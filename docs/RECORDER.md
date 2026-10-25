@@ -1,23 +1,27 @@
-# Browser recorder
+# Browser recording
 
-## Install and pair
+In Create agent → Demonstrate, choose **Start recording**. Relay opens its own Chromium window and connects automatically. Sign in normally, demonstrate the task, then choose **Finish** to return to editable workflow review. No model receives the recording automatically. **Pause** suspends capture; **Cancel** asks before discarding captured actions. App controls remain available when a browser page cannot show the toolbar.
 
-1. Start Relay. In Chrome or Chromium, open `chrome://extensions`, enable **Developer mode**, and choose **Load unpacked**.
-2. Select `packages/recorder-extension` from this repository. Packaged builds also include a `recorder-extension` directory in their resources.
-3. In Relay's creator, open **Demonstrate → Pair browser recorder**.
-4. Open the extension popup, paste the one-time code, and choose **Pair with Relay**. Codes expire after five minutes. The local bridge issues a random recorder token and stores only its hash.
-5. Visit the website you intend to demonstrate. Choose **Start / add this tab** and grant the requested origin permission. Only explicitly added tabs are captured. A visible badge identifies recording tabs.
-6. Use **Pause / resume**, **Stop and review**, or **Cancel recording**. Stop disables capture before review. Review/redact the JSON and choose **Send reviewed recording to Relay**, or export JSON for later import.
-7. Select the received recording in Relay's Demonstrate stage. Review/redact again before deterministic conversion or optional AI interpretation.
+## Implementation and privacy
 
-Installation is manual: Relay does not pretend it can install a Chrome extension automatically. Extension tokens are scoped to the employee who initiated pairing. Pair separately after changing demo employees; use separate browser profiles when demonstrating workflows belonging to different people.
+The browser is Playwright's full bundled Chromium (`channel: chromium`), not installed Chrome. Developer setup requires `npm run browsers`; deployments must provision the matching Playwright browser as described in README. Missing-browser/site errors offer Retry. See [official extension documentation](https://playwright.dev/docs/chrome-extensions).
 
-## What is captured
+Every session uses a fresh employee-scoped temporary profile. Login cookies are not borrowed or uploaded. Recording does not create a reusable connection: Connect remains an explicit separate login. Temporary profiles are removed on normal finish/cancel/shutdown. OS crashes can leave sensitive temporary profiles in application storage.
 
-Navigation, deliberate clicks, completed form changes, select changes, Enter/Escape, upload intent, tab IDs, timestamps, labels, roles, stable locator candidates and frame context. Download notifications are advisory; review and replace their manual step with a download action associated with the triggering click. Recorded uploads do not contain local filesystem paths or file contents.
+A random 256-bit capability is installed directly into the isolated extension worker over Playwright's private transport. The worker sends events to an ephemeral loopback listener requiring that capability on every request. The app renderer and page scripts never receive it. The listener closes with the session.
 
-Password, hidden, email and telephone fields, and fields identifiable as tokens, secrets, verification codes or payment data are excluded. URL credentials, queries and fragments are stripped on import. This deliberately loses URL parameters; restore safe variable parameters as explicit workflow inputs during review. This is not a general-purpose data-loss prevention system: review ordinary field values and page text for private information.
+Capture includes completed field changes, clicks, select changes, Enter, navigation, tab identifiers, frame URLs, timestamps, roles, accessible names, labels, stable attributes and locator candidates. Navigated pages, new tabs and supported HTTP(S) frames automatically receive the extension. Only employee-approved origins are captured. Unapproved websites show “This site isn’t recorded.” Browser-internal pages, blank/srcdoc and inaccessible sandboxed frames are unsupported; use app controls and manually author these steps. Captured frame actions receive a human recommendation because runtime frame replay is not implemented.
 
-Restricted pages such as browser settings and extension-store pages cannot be recorded. Cross-origin frames may be inaccessible unless their origins are granted; inaccessible frames require manual authoring/handoff. New tabs must be explicitly added. No OS-wide capture, desktop Excel recording, video inference, or coordinate-based replay is implemented.
+Password, hidden, email, telephone, recognizable authentication/OTP and payment inputs are excluded before transport, with a second service-side filter. Upload events contain no local filenames or contents. URL credentials, queries and fragments are stripped. Review other business values before optional AI interpretation. This is not a general-purpose data-loss prevention system. Download notifications need review to associate them with a replayable download target. No desktop recording, Excel observation, video inference or coordinate replay is used.
 
-The bridge listens only on loopback by default. `/pair` requires the expiring code; `/recordings` requires the issued bearer token. Exported files and extension storage can contain demonstrated business values—keep them private.
+Events are checkpointed to SQLite. Unexpected closure preserves actions and offers **Review saved actions** or **Retry**. Switching employees closes the previous recording browser and hides their recordings.
+
+## Developer-only existing-browser extension
+
+The older extension is retained for development/export testing, not offered in the normal employee flow. In Chromium's extensions page enable developer mode and load `packages/recorder-extension` (not the managed subdirectory). Obtain an expiring code through the local service's `pair` request, enter it in the popup, then explicitly add approved tabs. The development bridge on loopback port 4319 requires authenticated pairing and bearer tokens. Export recordings for import into Relay. No store-distributed existing-browser installation is implemented.
+
+## Verification
+
+`npx tsx --test tests/managed-recorder.test.ts` tests actual bundled Chromium capture across navigation, tabs and frames, sensitive exclusion, pause/resume, finish/cancel, employee isolation and unauthorized requests.
+
+After `npm run build`, run `npx tsx scripts/recording-journey-test.ts` for the actual Electron creation → recording → review → test → enable → run → Results journey. Screenshots and videos are saved under `test-output/recording-journey-*`. This uses fictional fixture credentials and an isolated database. Only this explicit test sets `RELAY_TEST_CAPTURE=1` to enable video and an ephemeral loopback DevTools port for the test driver. Never use that diagnostic flag with real account data. Normal recording has neither video capture nor a DevTools endpoint.

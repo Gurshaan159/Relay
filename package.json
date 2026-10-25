@@ -8,6 +8,8 @@
   "main": "dist/electron/main.cjs",
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "demo": "npm run build && tsx scripts/demo.ts",
+    "test:admin": "npm run build && tsx scripts/admin-journey-test.ts",
     "build": "vite build && node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
@@ -20,6 +22,7 @@
     "runner": "tsx packages/server/remote-runner.ts",
     "test:ui": "npm run build && node scripts/visual-test.mjs",
     "test:journey": "npm run build && tsx scripts/journey-test.ts",
+    "test:recording": "npm run build && tsx scripts/recording-journey-test.ts",
     "reset": "node scripts/reset.mjs",
     "start": "electron .",
     "format": "prettier --write packages scripts tests config *.json *.ts",

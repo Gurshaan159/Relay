@@ -180,7 +180,6 @@ function App() {
                 ["Teams", IconUsers],
                 ["Approved websites", IconWorld],
                 ["Data", IconDatabase],
-                ["Budget", IconCoin],
               ]
             : [
                 ["My agents", IconStack2],
@@ -576,7 +575,6 @@ function App() {
 function Connections({ data, act }: any) {
   const [url, setUrl] = useState("");
   const [location, setLocation] = useState("local");
-  const [signing, setSigning] = useState(false);
   return (
     <>
       <Group justify="space-between" mb={30}>
@@ -652,12 +650,11 @@ function Connections({ data, act }: any) {
                   </Button>
                 ) : site.type === "api" ? (
                   <ApiConnection site={site} location={location} act={act} />
-                ) : signing ? (
+                ) : data.signingSites?.includes(`${data.employee.id}:${location}:${site.id}`) ? (
                   <Button
                     onClick={() =>
                       act(async () => {
                         await api("finishConnect", { site: site.id });
-                        setSigning(false);
                       })
                     }
                   >
@@ -669,7 +666,6 @@ function Connections({ data, act }: any) {
                     onClick={() =>
                       act(async () => {
                         await api("connect", { site: site.id, location });
-                        setSigning(true);
                       })
                     }
                   >
@@ -1298,6 +1294,8 @@ const toBase64 = async (file: File) => {
   return btoa(text);
 };
 function Admin({ page, setPage, data, act }: any) {
+  const [siteSaving, setSiteSaving] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [state, setState] = useState<any>();
   const [team, setTeam] = useState<string>();
   const [moving, setMoving] = useState<{ member: any; team: string }>();
@@ -1308,7 +1306,7 @@ function Admin({ page, setPage, data, act }: any) {
     collectionId?: string;
     modelId?: string;
   }>();
-  const load = () => api("admin").then(setState);
+  const load = () => api("admin").then(value => { setState(value); setLoadError(""); });
   const change = (fn: () => Promise<any>) =>
     act(async () => {
       const value = await fn();
@@ -1316,7 +1314,7 @@ function Admin({ page, setPage, data, act }: any) {
       return value;
     });
   useEffect(() => {
-    load().catch(() => {});
+    load().catch(() => setLoadError("Couldn’t load the admin workspace. Please retry."));
     setTeam(undefined);
     setModelView(undefined);
   }, [page]);
@@ -1331,7 +1329,7 @@ function Admin({ page, setPage, data, act }: any) {
   if (!state)
     return (
       <div className="empty">
-        <Loader />
+        {loadError ? <Alert color="red">{loadError}<Button mt="sm" onClick={() => load().catch(() => setLoadError("Couldn’t load the admin workspace. Please retry."))}>Retry</Button></Alert> : <Loader />}
       </div>
     );
   const name = (id: string) =>
@@ -1348,15 +1346,14 @@ function Admin({ page, setPage, data, act }: any) {
     ),
     collections: state.collections.filter((c: any) => c.team === id),
   });
-  const toggleSite = (t: any, site: string, on: boolean) =>
-    change(() =>
-      api("setTeamSites", {
-        team: t.id,
-        sites: on
-          ? [...t.sites, site]
-          : t.sites.filter((s: string) => s !== site),
-      }),
-    );
+  const toggleSite = async (t: any, site: string, on: boolean) => {
+    if (siteSaving) return;
+    const approved = on ? [...t.sites, site] : t.sites.filter((s: string) => s !== site);
+    setSiteSaving(true);
+    setState((value: any) => ({ ...value, teams: value.teams.map((item: any) => item.id === t.id ? { ...item, sites: approved } : item) }));
+    try { await change(() => api("setTeamSites", { team: t.id, sites: approved })); }
+    finally { await load().catch(() => {}); setSiteSaving(false); }
+  };
   const header = (title: string, text: string, action?: React.ReactNode) => (
     <Group justify="space-between" mb={30}>
       <div>
@@ -1483,6 +1480,7 @@ function Admin({ page, setPage, data, act }: any) {
                   label={s.name}
                   description={new URL(s.origin).host}
                   checked={selected.sites.includes(s.id)}
+                  disabled={siteSaving}
                   onChange={(e) =>
                     toggleSite(selected, s.id, e.currentTarget.checked)
                   }
@@ -1512,18 +1510,6 @@ function Admin({ page, setPage, data, act }: any) {
                 </Text>
               )}
             </Stack>
-          </Paper>
-          <Paper withBorder p="xl" radius="lg">
-            <Group justify="space-between">
-              <Title order={3}>Budget</Title>
-              <Badge variant="light" color="gray">
-                Not available yet
-              </Badge>
-            </Group>
-            <Text size="sm" c="dimmed" mt={4}>
-              Relay doesn’t measure agent costs yet, so this team has no
-              spending limit.
-            </Text>
           </Paper>
         </Stack>
       </>
@@ -1593,6 +1579,7 @@ function Admin({ page, setPage, data, act }: any) {
                     key={t.id}
                     label={t.name}
                     checked={t.sites.includes(s.id)}
+                    disabled={siteSaving}
                     onChange={(e) =>
                       toggleSite(t, s.id, e.currentTarget.checked)
                     }
@@ -1664,11 +1651,11 @@ function Admin({ page, setPage, data, act }: any) {
         {state.collections.length ? (
           <Paper withBorder radius="lg" className="agent-list">
             {state.collections.map((c: any) => (
-              <div className="agent-row" key={c.id}>
+              <div className="agent-row collection-row" key={c.id}>
                 <div className="agent-icon">
                   <IconFile size={24} />
                 </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ flex: "1 1 220px", minWidth: 0 }}>
                   <Text fw={650}>{c.name}</Text>
                   {c.description && (
                     <Text size="sm" mt={4}>
@@ -2656,6 +2643,9 @@ function ModelPage({ view, open, state, data, act, change }: any) {
   );
 }
 function AddCollection({ opened, close, teams, change }: any) {
+  const [failure, setFailure] = useState("");
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { if (opened) setFailure(""); }, [opened]);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [team, setTeam] = useState<string | null>(teams[0]?.value || null);
@@ -2663,6 +2653,7 @@ function AddCollection({ opened, close, teams, change }: any) {
   return (
     <Modal opened={opened} onClose={close} title="Add data collection" centered>
       <Stack>
+        {failure && <Alert color="red" title="Couldn’t add this file">{failure}</Alert>}
         <TextInput
           label="Name"
           placeholder="Customer accounts"
@@ -2693,8 +2684,11 @@ function AddCollection({ opened, close, teams, change }: any) {
         />
         <Button
           disabled={!name.trim() || !team || !file}
+          loading={saving}
           onClick={() =>
             change(async () => {
+              setSaving(true); setFailure("");
+              try {
               await api("addCollection", {
                 name,
                 description,
@@ -2706,6 +2700,8 @@ function AddCollection({ opened, close, teams, change }: any) {
               setDescription("");
               setFile(null);
               close();
+              } catch (e) { setFailure((e as Error).message); throw e; }
+              finally { setSaving(false); }
             })
           }
         >
@@ -2769,7 +2765,71 @@ function Wizard({ initial, data, close, changed, fail }: any) {
   const [saving, setSaving] = useState(false);
   const [events, setEvents] = useState("[]");
   const [ai, setAi] = useState(false);
-  const [pair, setPair] = useState<any>();
+  const [recordingBusy, setRecordingBusy] = useState(false);
+  const [recordingError, setRecordingError] = useState("");
+  const receivedRecording = useRef("");
+  const recording =
+    data.recordingSession?.agentId === form.id ? data.recordingSession : null;
+  const recordingActive =
+    recording && ["starting", "recording", "paused"].includes(recording.status);
+  useEffect(() => {
+    if (
+      recording?.status === "finished" &&
+      receivedRecording.current !== recording.id
+    ) {
+      receivedRecording.current = recording.id;
+      setEvents(JSON.stringify(recording.events, null, 2));
+      setForm((f: any) => ({
+        ...f,
+        workflow: { ...f.workflow, steps: recording.workflow.steps },
+      }));
+      setStage(2);
+      void api("recordingControl", { action: "reviewed" }).catch(() =>
+        setRecordingError(
+          "Couldn’t save the review. Please keep Relay open and retry.",
+        ),
+      );
+    }
+  }, [recording?.id, recording?.status]);
+  async function startRecording() {
+    setRecordingBusy(true);
+    setRecordingError("");
+    try {
+      if (recording && ["error", "interrupted"].includes(recording.status)) {
+        if (
+          recording.count &&
+          !window.confirm("Discard the saved actions and start again?")
+        )
+          return;
+        await api("recordingControl", { action: "cancel", confirm: true });
+      }
+      const saved = await save({ status: "Draft" });
+      if (!saved) throw Error("Give your agent a name first.");
+      const result = await api("startRecording", { agentId: saved.id });
+      if (result.status === "error") setRecordingError(result.error);
+      await changed();
+    } catch (e) {
+      setRecordingError((e as Error).message);
+    } finally {
+      setRecordingBusy(false);
+    }
+  }
+  async function controlRecording(action: string) {
+    if (
+      action === "cancel" &&
+      recording?.count &&
+      !window.confirm(
+        "Discard this demonstration? Your recorded actions will be lost.",
+      )
+    )
+      return;
+    try {
+      await api("recordingControl", { action, confirm: true });
+      await changed();
+    } catch {
+      setRecordingError("Couldn’t update the recording. Please retry.");
+    }
+  }
   const [inputs, setInputs] = useState<Record<string, string>>({});
   const [untested, setUntested] = useState(false);
   const [runId, setRunId] = useState("");
@@ -2857,6 +2917,7 @@ function Wizard({ initial, data, close, changed, fail }: any) {
           <Button
             variant="subtle"
             color="gray"
+            disabled={!!recordingActive || recordingBusy}
             onClick={() =>
               perform(async () => {
                 await save({ status: "Draft" });
@@ -2868,7 +2929,12 @@ function Wizard({ initial, data, close, changed, fail }: any) {
           </Button>
         </Group>
       </Group>
-      <Stepper active={stage} onStepClick={setStage} size="sm" mb={36}>
+      <Stepper
+        active={stage}
+        onStepClick={recordingActive || recordingBusy ? undefined : setStage}
+        size="sm"
+        mb={36}
+      >
         {["Describe", "Demonstrate", "Review", "Connect", "Test", "Enable"].map(
           (label) => (
             <Stepper.Step key={label} label={label} />
@@ -2915,19 +2981,18 @@ function Wizard({ initial, data, close, changed, fail }: any) {
           )}
           {stage === 1 && (
             <>
-              <Title order={2}>Show Relay the task</Title>
+              <Title order={2}>Show Relay how you do it</Title>
               <Text size="sm" c="dimmed">
-                Record deliberate actions in an approved browser tab, or add
-                steps yourself.
+                We’ll open a browser for your demonstration.
               </Text>
               <Group>
                 <Button
                   leftSection={<IconBrowser size={18} />}
-                  onClick={() =>
-                    perform(async () => setPair(await api("pair")))
-                  }
+                  loading={recordingBusy}
+                  disabled={!!recordingActive}
+                  onClick={startRecording}
                 >
-                  Pair browser recorder
+                  Start recording
                 </Button>
                 <Button variant="default" component="label">
                   Import recording
@@ -2974,67 +3039,115 @@ function Wizard({ initial, data, close, changed, fail }: any) {
                   Write steps manually
                 </Button>
               </Group>
-              {pair && (
-                <Alert title="Connect your recorder" color="teal">
-                  Load packages/recorder-extension in Chrome’s extensions
-                  developer mode. Open its popup and paste this one-time pairing
-                  code (expires in 5 minutes):
-                  <Code block mt="sm">
-                    {pair.code}
-                  </Code>
+              {(recordingError || recording?.error) && (
+                <Alert color="red" title="Recording stopped">
+                  {recordingError || recording.error}
+                  <Group mt="sm">
+                    <Button
+                      size="xs"
+                      onClick={startRecording}
+                      loading={recordingBusy}
+                    >
+                      Retry
+                    </Button>
+                    {recording?.count > 0 && (
+                      <Button
+                        size="xs"
+                        variant="default"
+                        onClick={() => controlRecording("finish")}
+                      >
+                        Review saved actions
+                      </Button>
+                    )}
+                  </Group>
                 </Alert>
               )}
-              <Select
-                label="Received recordings"
-                placeholder="Choose a recording"
-                data={data.recordings.map((r: any) => ({
-                  value: r.id,
-                  label: `${new Date(r.created).toLocaleString()} · ${r.events.length} actions`,
-                }))}
-                onChange={(v) =>
-                  setEvents(
-                    JSON.stringify(
-                      data.recordings.find((r: any) => r.id === v)?.events ||
-                        [],
-                      null,
-                      2,
-                    ),
-                  )
-                }
-              />
-              <Textarea
-                label="Review and redact before interpretation"
-                description="Remove any private values before continuing."
-                autosize
-                minRows={5}
-                maxRows={12}
-                value={events}
-                onChange={(e) => setEvents(e.target.value)}
-              />
-              <Checkbox
-                checked={ai}
-                onChange={(e) => setAi(e.currentTarget.checked)}
-                label="Use configured AI provider to interpret this recording"
-              />
-              <Text size="xs" c="dimmed">
-                Without a provider, Relay converts recorded events directly. It
-                does not infer unseen work.
-              </Text>
-              <Button
-                variant="light"
-                onClick={() =>
-                  perform(async () => {
-                    const result = await api("interpret", {
-                      events: JSON.parse(events),
-                      ai,
-                    });
-                    wf(result);
-                    setStage(2);
-                  })
-                }
-              >
-                Convert to steps
-              </Button>
+              {recordingActive && (
+                <Group>
+                  <Badge variant="light">
+                    {recording.status === "paused" ? "Paused" : "Recording"} ·{" "}
+                    {recording.count} actions
+                  </Badge>
+                  <Button
+                    variant="default"
+                    onClick={() =>
+                      controlRecording(
+                        recording.status === "paused" ? "resume" : "pause",
+                      )
+                    }
+                  >
+                    {recording.status === "paused" ? "Resume" : "Pause"}
+                  </Button>
+                  <Button onClick={() => controlRecording("finish")}>
+                    Finish
+                  </Button>
+                  <Button
+                    variant="subtle"
+                    color="gray"
+                    onClick={() => controlRecording("cancel")}
+                  >
+                    Cancel
+                  </Button>
+                  <Text size="xs" c="dimmed">
+                    Use the browser to demonstrate your task. Only approved
+                    websites are recorded.
+                  </Text>
+                </Group>
+              )}
+              <details>
+                <summary>Import or review a saved recording</summary>
+                <Select
+                  label="Received recordings"
+                  placeholder="Choose a recording"
+                  data={data.recordings.map((r: any) => ({
+                    value: r.id,
+                    label: `${new Date(r.created).toLocaleString()} · ${r.events.length} actions`,
+                  }))}
+                  onChange={(v) =>
+                    setEvents(
+                      JSON.stringify(
+                        data.recordings.find((r: any) => r.id === v)?.events ||
+                          [],
+                        null,
+                        2,
+                      ),
+                    )
+                  }
+                />
+                <Textarea
+                  label="Review and redact before interpretation"
+                  description="Remove any private values before continuing."
+                  autosize
+                  minRows={5}
+                  maxRows={12}
+                  value={events}
+                  onChange={(e) => setEvents(e.target.value)}
+                />
+                <Checkbox
+                  checked={ai}
+                  onChange={(e) => setAi(e.currentTarget.checked)}
+                  label="Use configured AI provider to interpret this recording"
+                />
+                <Text size="xs" c="dimmed">
+                  Without a provider, Relay converts recorded events directly.
+                  It does not infer unseen work.
+                </Text>
+                <Button
+                  variant="light"
+                  onClick={() =>
+                    perform(async () => {
+                      const result = await api("interpret", {
+                        events: JSON.parse(events),
+                        ai,
+                      });
+                      wf(result);
+                      setStage(2);
+                    })
+                  }
+                >
+                  Convert to steps
+                </Button>
+              </details>
             </>
           )}
           {stage === 2 && (
@@ -3559,7 +3672,7 @@ function Wizard({ initial, data, close, changed, fail }: any) {
         <Button
           variant="default"
           leftSection={<IconArrowLeft size={16} />}
-          disabled={stage === 0}
+          disabled={stage === 0 || !!recordingActive || recordingBusy}
           onClick={() => setStage(stage - 1)}
         >
           Back
@@ -3567,7 +3680,7 @@ function Wizard({ initial, data, close, changed, fail }: any) {
         {stage < 5 ? (
           <Button
             rightSection={<IconArrowRight size={16} />}
-            disabled={!form.name.trim()}
+            disabled={!form.name.trim() || !!recordingActive || recordingBusy}
             onClick={() =>
               perform(async () => {
                 await save({ status: "Draft" });
@@ -3663,10 +3776,6 @@ function Settings({ opened, close, data, act }: any) {
         <Divider />
         <Text size="sm">
           Relay 0.1 · Demo identity switching is not secure authentication.
-        </Text>
-        <Text size="xs" c="dimmed">
-          Recorder installation: load packages/recorder-extension as an unpacked
-          Chromium extension, then pair from the Demonstrate step.
         </Text>
       </Stack>
     </Modal>

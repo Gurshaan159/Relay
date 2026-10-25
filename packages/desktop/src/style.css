@@ -113,6 +113,8 @@ a:focus-visible {
 .agent-row:last-child {
   border-bottom: 0;
 }
+.collection-row { flex-wrap: wrap; }
+.collection-row .mantine-Select-root { max-width: 190px; }
 .agent-icon {
   height: 48px;
   min-width: 48px;

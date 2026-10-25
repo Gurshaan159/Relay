@@ -19,6 +19,7 @@ import {
 import { interpret, modelInterpret, redact } from "./recording";
 import { RemoteBackend } from "./remote";
 import { Models, costs, type Model } from "./models";
+import { ManagedRecorder } from "./managed-recorder";
 export const hash = (s: string) => createHash("sha256").update(s).digest("hex");
 async function preview(file: string, name: string) {
   if (!name.endsWith(".xlsx") && !name.endsWith(".csv"))
@@ -44,6 +45,7 @@ async function preview(file: string, name: string) {
   };
 }
 export class Service {
+  recorder: ManagedRecorder;
   runtime: Runtime;
   remote: RemoteBackend;
   models: Models;
@@ -59,6 +61,7 @@ export class Service {
     },
   ) {
     store.seed();
+    this.recorder = new ManagedRecorder(store);
     this.remote = new RemoteBackend(store, secrets);
     this.models = new Models(store, secrets);
     this.runtime = new Runtime(
@@ -308,6 +311,16 @@ export class Service {
       }
     }
     switch (method) {
+      case "startRecording":
+        return this.recorder.start(owner, z.string().parse(p.agentId));
+      case "recordingControl":
+        return this.recorder.control(
+          owner,
+          z
+            .enum(["pause", "resume", "finish", "cancel", "reviewed"])
+            .parse(p.action),
+          p.confirm === true,
+        );
       case "backend": {
         this.store.agent(id, owner, true);
         if (!this.secrets) throw Error("Secure token storage unavailable");
@@ -345,6 +358,8 @@ export class Service {
         return {
           employee,
           employees: this.store.employees(),
+          recordingSession: this.recorder.state(owner),
+          signingSites: [...this.logins.keys()].filter(key => key.startsWith(owner + ":")),
           sites,
           allowedSites: this.store.allowedSites(owner),
           collections: this.store
@@ -563,16 +578,26 @@ export class Service {
         try {
           const context = await chromium.launchPersistentContext(profile, {
             headless: false,
+            ...(process.env.RELAY_TEST_CAPTURE === "1" ? { args: ["--remote-debugging-port=0", "--remote-debugging-address=127.0.0.1"] } : {}),
           });
           this.logins.set(key, context);
+          context.on("close", () => {
+            if (this.logins.get(key) === context) {
+              this.logins.delete(key);
+              this.runtime.locks.delete(`${owner}:${location}`);
+            }
+          });
           await context.pages()[0].goto(site.origin + site.login);
           return true;
         } catch (e) {
+          await this.logins.get(key)?.close().catch(() => {});
+          this.logins.delete(key);
           this.runtime.locks.delete(`${owner}:${location}`);
           throw e;
         }
       }
       case "deactivate": {
+        await this.recorder.close(owner);
         for (const run of this.store
           .all<Run>("run")
           .filter((r) => r.owner === owner)) {
@@ -911,6 +936,7 @@ export class Service {
       throw Error("Admin access required");
   }
   async close() {
+    await this.recorder.close();
     if (this.timer) clearInterval(this.timer);
     await this.runtime.close();
     await Promise.all([...this.logins.values()].map((c) => c.close()));

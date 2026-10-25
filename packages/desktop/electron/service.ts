@@ -20,6 +20,8 @@ const service = new Service(new Store(), "local", {
   get: (id) => secret("get", id),
 });
 service.start();
+service.recorder.onFinished = () =>
+  parentPort!.postMessage({ recordingFinished: true });
 const server = serve(service, 4319, true);
 server.on("error", (e) =>
   console.error("Recorder bridge unavailable:", e.message),

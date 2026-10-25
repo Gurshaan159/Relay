@@ -75,7 +75,7 @@ SQLite, run files and isolated browser profiles live below this directory. `npm 
 
 ## Recording and providers
 
-Follow [recorder installation and pairing](docs/RECORDER.md). Recording is opt-in, limited to explicitly selected Chromium tabs, and reviewable before interpretation. Manual step authoring and deterministic event conversion work without an API key.
+Choose **Start recording** to open an automatically connected Relay browser. Capture is opt-in and limited to approved websites, including new tabs and supported frames. Finish returns to editable review. See [recording and developer setup](docs/RECORDER.md). Manual authoring and deterministic conversion work without an API key.
 
 In **Application settings**, enter an OpenAI-compatible `/v1` endpoint, supported model identifier, and API key. The adapter calls `/chat/completions` with JSON output and validates the resulting workflow. For OpenAI, the base endpoint is `https://api.openai.com/v1`. Choose a model that supports Chat Completions and JSON object output. No provider model is silently selected and no live provider call is claimed without credentials.
 

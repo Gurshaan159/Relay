@@ -5,7 +5,7 @@ export function redact(events: any[]) {
     .filter(
       (e) =>
         !["password", "hidden", "email", "tel"].includes(e.inputType) &&
-        !/password|token|secret|verification|credit|card|otp/i.test(
+        !/password|token|secret|verification|credit|card|otp|one.time|auth|passcode|cvc|cvv|security.code/i.test(
           `${e.name || ""} ${e.label || ""} ${e.autocomplete || ""}`,
         ),
     )
@@ -21,6 +21,14 @@ export function redact(events: any[]) {
         ? e.candidates.slice(0, 5).map((s: unknown) => String(s).slice(0, 500))
         : [],
       frame: String(e.frame || ""),
+      attributes: e.attributes
+        ? Object.fromEntries(
+            ["id", "name", "testId"].map((k) => [
+              k,
+              String(e.attributes[k] || "").slice(0, 200),
+            ]),
+          )
+        : {},
       tab: e.tab,
       timestamp: e.timestamp,
     }));
@@ -62,11 +70,19 @@ export function interpret(events: any[]) {
     value: e.value,
     output: `step${i}`,
     assignedTo: "runner",
-    recommendation: e.action === "upload" ? "Keep manual" : "Automate",
-    reason:
+    recommendation:
+      e.frame ||
+      (!e.locator && !["navigate", "tab"].includes(e.action)) ||
       e.action === "upload"
-        ? "Choose a run file before automating this upload."
-        : "Converted directly from the recorded action; review fixed values.",
+        ? "Keep manual"
+        : "Automate",
+    reason: e.frame
+      ? "Recorded inside a frame. Keep this action human until a frame-aware locator is configured."
+      : !e.locator && !["navigate", "tab"].includes(e.action)
+        ? "Choose a verified element or keep this action human."
+        : e.action === "upload"
+          ? "Choose a run file before automating this upload."
+          : "Converted directly from the recorded action; review fixed values.",
   }));
   return workflowSchema.parse({ steps });
 }

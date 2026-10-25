@@ -76,7 +76,6 @@ try {
   for (const [nav, heading, file] of [
     ["Approved websites", "Approved websites", "admin-websites"],
     ["Data", "No data collections yet", "admin-data"],
-    ["Budget", "Budgets aren’t available yet", "admin-budget"],
   ]) {
     await window.getByRole("button", { name: nav, exact: true }).click();
     await window.getByRole("heading", { name: heading, exact: true }).waitFor();

@@ -187,6 +187,8 @@ export interface ResultRow {
 export const requestSchema = z.object({
   method: z.enum([
     "snapshot",
+    "startRecording",
+    "recordingControl",
     "deactivate",
     "backend",
     "saveAgent",

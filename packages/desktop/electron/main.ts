@@ -15,9 +15,22 @@ app.whenReady().then(async () => {
   const root = process.env.RELAY_DATA_DIR || app.getPath("userData");
   await mkdir(path.join(root, "secrets"), { recursive: true, mode: 0o700 });
   worker = new Worker(path.join(__dirname, "service.cjs"), {
-    env: { ...process.env, RELAY_DATA_DIR: process.env.RELAY_DATA_DIR || root },
+    env: {
+      ...process.env,
+      RELAY_DATA_DIR: process.env.RELAY_DATA_DIR || root,
+      RELAY_MANAGED_RECORDER: path.join(
+        app.isPackaged ? process.resourcesPath : app.getAppPath(),
+        app.isPackaged ? "recorder-extension" : "packages/recorder-extension",
+        "managed",
+      ),
+    },
   });
   worker.on("message", async (m) => {
+    if (m.recordingFinished) {
+      window?.show();
+      window?.focus();
+      return;
+    }
     if (m.secret) {
       try {
         if (

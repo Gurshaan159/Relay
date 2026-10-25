@@ -43,6 +43,10 @@ try {
   await service.close();
   store.close();
   app = await electron.launch({
+    recordVideo: {
+      dir: "test-output/videos",
+      size: { width: 1320, height: 900 },
+    },
     executablePath: process.env.RELAY_EXECUTABLE || require("electron"),
     args: process.env.RELAY_EXECUTABLE ? [] : ["."],
     env: { ...process.env, RELAY_DATA_DIR: root, RELAY_HEADLESS: "1" },
@@ -84,7 +88,11 @@ try {
     "Real Electron run, human review, upload, persisted Results and workbook preview passed.",
   );
 } finally {
-  if (app) await app.close();
+  if (app) {
+    const video = (await app.firstWindow()).video();
+    await app.close();
+    await video?.saveAs("test-output/full-agent-run.webm");
+  }
   await service.close();
   try {
     store.close();
