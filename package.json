@@ -1,0 +1,94 @@
+{
+  "name": "relay",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Employee browser workflow agents, recordings and results",
+  "author": "Relay contributors",
+  "type": "module",
+  "main": "dist/electron/main.cjs",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "vite build && node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "server": "tsx packages/server/index.ts",
+    "worker": "tsx packages/server/worker.ts",
+    "fixture": "tsx packages/server/fixture.ts",
+    "seed": "tsx packages/server/seed.ts",
+    "package": "npm run build && electron-builder",
+    "browsers": "playwright install chromium",
+    "runner": "tsx packages/server/remote-runner.ts",
+    "test:ui": "npm run build && node scripts/visual-test.mjs",
+    "test:journey": "npm run build && tsx scripts/journey-test.ts",
+    "reset": "node scripts/reset.mjs",
+    "start": "electron .",
+    "format": "prettier --write packages scripts tests config *.json *.ts",
+    "package:dir": "npm run build && electron-builder --dir"
+  },
+  "dependencies": {
+    "@mantine/core": "9.7.3",
+    "@mantine/hooks": "9.7.3",
+    "@tabler/icons-react": "3.35.0",
+    "exceljs": "4.4.0",
+    "jszip": "3.10.1",
+    "playwright": "1.64.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.1.2",
+    "electron": "45.0.0",
+    "electron-builder": "26.18.0",
+    "esbuild": "0.27.0",
+    "prettier": "3.6.2",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3",
+    "vite": "8.3.5"
+  },
+  "build": {
+    "directories": {
+      "output": "release"
+    },
+    "appId": "com.relay.desktop",
+    "productName": "Relay",
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/playwright*/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "packages/recorder-extension",
+        "to": "recorder-extension"
+      }
+    ],
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.productivity"
+    },
+    "win": {
+      "signAndEditExecutable": false,
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ]
+    }
+  },
+  "overrides": {
+    "exceljs": {
+      "uuid": "11.1.1"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+[
+  {
+    "id": "fixture",
+    "name": "Northstar Orders · fixture",
+    "origin": "http://127.0.0.1:4318",
+    "login": "/login",
+    "type": "browser",
+    "sessionCookie": "relay_fixture_session"
+  },
+  {
+    "id": "fixture-api",
+    "name": "Northstar Orders API · fixture",
+    "origin": "http://127.0.0.1:4318",
+    "login": "/api/token-orders",
+    "type": "api",
+    "auth": "bearer",
+    "verifyPath": "/api/token-orders"
+  }
+]

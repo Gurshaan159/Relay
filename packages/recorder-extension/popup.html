@@ -1,0 +1,68 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body {
+        width: 330px;
+        padding: 18px;
+        font: 14px system-ui;
+        color: #243647;
+      }
+      h1 {
+        font-size: 22px;
+      }
+      button,
+      input,
+      textarea {
+        font: inherit;
+        box-sizing: border-box;
+        width: 100%;
+        padding: 9px;
+        margin: 5px 0;
+      }
+      button {
+        border: 1px solid #dae3e8;
+        background: #f3f8f8;
+        border-radius: 7px;
+        cursor: pointer;
+      }
+      textarea {
+        height: 150px;
+      }
+      #status {
+        color: #147780;
+        overflow-wrap: anywhere;
+      }
+      .hint {
+        font-size: 12px;
+        color: #617184;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Relay recorder</h1>
+    <div id="status">Not paired</div>
+    <input
+      id="code"
+      aria-label="Pairing code"
+      placeholder="One-time pairing code"
+    /><button id="pair">Pair with Relay</button>
+    <p class="hint">
+      Only tabs explicitly added below are recorded. Password and sensitive
+      fields are excluded.
+    </p>
+    <button id="start">Start / add this tab</button
+    ><button id="pause">Pause / resume</button
+    ><button id="stop">Stop and review</button
+    ><button id="cancel">Cancel recording</button
+    ><label
+      >Review and redact<textarea
+        id="events"
+        aria-label="Recorded actions"
+      ></textarea></label
+    ><button id="send">Send reviewed recording to Relay</button
+    ><button id="export">Export JSON</button>
+    <script src="popup.js"></script>
+  </body>
+</html>
