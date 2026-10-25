@@ -8,6 +8,8 @@ import {
   sites,
   workflowSchema,
   type Agent,
+  type Collection,
+  type Employee,
   type Run,
   type ResultRow,
 } from "./schema";
@@ -68,10 +70,26 @@ export class Store {
       throw e;
     }
   }
-  employee(id: string) {
+  employee(id: string): Employee {
     const e = employees.find((e) => e.id === id);
     if (!e) throw Error("Unknown demo employee");
-    return e;
+    return { ...e, ...this.get("employee", id) };
+  }
+  employees() {
+    return employees.map((e) => this.employee(e.id));
+  }
+  allowedSites(owner: string) {
+    const permitted = this.get("permission", owner)?.sites || [];
+    const team = this.get("team", this.employee(owner).team);
+    return permitted.filter(
+      (id: string) => !team?.sites || team.sites.includes(id),
+    ) as string[];
+  }
+  collection(id: string, owner: string): Collection {
+    const c = this.get<Collection>("collection", id);
+    if (!c || c.team !== this.employee(owner).team)
+      throw Error("Data collection not available to your team");
+    return c;
   }
   agent(id: string, owner: string, edit = false): Agent {
     const a = this.get<Agent>("agent", id);
@@ -86,7 +104,16 @@ export class Store {
     return r;
   }
   seed() {
-    if (this.get("meta", "seed")) return;
+    if (this.get("meta", "seed")) {
+      // Data directories seeded before model steps existed get the tool once.
+      if (!this.get("meta", "model-tool")) {
+        for (const p of this.all("permission"))
+          if (!p.tools.includes("model"))
+            this.put("permission", { ...p, tools: [...p.tools, "model"] });
+        this.put("meta", { id: "model-tool", at: new Date().toISOString() });
+      }
+      return;
+    }
     employees.forEach((e) => this.put("employee", e));
     this.put("company", { id: "northstar", name: "Northstar Supply (demo)" });
     for (const team of ["Operations", "Customer success"])
@@ -109,6 +136,7 @@ export class Store {
           "http",
           "transform",
           "tab",
+          "model",
         ],
         sites: sites.map((s) => s.id),
       });
@@ -212,6 +240,7 @@ export class Store {
       }),
     });
     this.put("meta", { id: "seed", at: new Date().toISOString() });
+    this.put("meta", { id: "model-tool", at: new Date().toISOString() });
   }
   results(run: Run, rows: Record<string, unknown>[], source: string) {
     this.transaction(() => {

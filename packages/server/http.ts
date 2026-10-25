@@ -59,10 +59,25 @@ export function serve(service: Service, port = 4319, bridgeOnly = false) {
         send({ saved: true });
         return;
       }
+      const modelRoute = url.pathname.match(/^\/models\/([\w-]+)\/predict$/);
+      if (modelRoute && req.method === "POST") {
+        const scoped = service.store
+          .all("token")
+          .find((t) => t.digest === hash(token) && t.modelId);
+        if (!scoped) throw Error("Unauthorized");
+        if (scoped.modelId !== modelRoute[1]) throw Error("Forbidden");
+        send(
+          await service.request(scoped.owner, {
+            method: "predict",
+            payload: { id: modelRoute[1], text: body.inputs },
+          }),
+        );
+        return;
+      }
       if (bridgeOnly) throw Error("Not found");
       const integration = service.store
         .all("token")
-        .find((t) => t.digest === hash(token));
+        .find((t) => t.digest === hash(token) && !t.modelId);
       if (!integration) throw Error("Unauthorized");
       const owner = integration.owner;
       let match;

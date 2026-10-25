@@ -38,3 +38,17 @@ curl http://127.0.0.1:4320/artifacts/ARTIFACT_ID -H "Authorization: Bearer YOUR_
 Unauthorized requests return 401; scope violations return 403; malformed or unavailable operations return JSON `{ "error": "..." }` with a 4xx status. Requests are limited to 2 MB. Run/result/file access is checked by the service; sharing an agent does not authorize someone else to read its owner's results.
 
 The API supports a `test: true` submission for an authorized draft. The configuration endpoint's enable action explicitly accepts an untested workflow; API clients must perform their own test/review process. No provider secret or browser profile is returned by these endpoints.
+
+## Published models
+
+Create a token in **Admin → Data → (model) → Use the model**. Model tokens are scoped to one model and cannot call agent routes. The desktop app serves this route on its loopback bridge while it is open:
+
+```sh
+curl -X POST http://127.0.0.1:4319/models/MODEL_ID/predict \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"inputs":"Where is my parcel?"}'
+```
+
+The response is `{ "label": "...", "score": 0.91, "model": "MODEL_ID", "revision": "..." }`. Unpublished models return 400.
+

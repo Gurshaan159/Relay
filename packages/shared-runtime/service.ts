@@ -9,19 +9,44 @@ import { Store } from "./store";
 import { Runtime, allowedURL } from "./runtime";
 import {
   agentSchema,
-  employees,
   sites,
   requestSchema,
   type Agent,
+  type Collection,
   type Run,
   type Request,
 } from "./schema";
 import { interpret, modelInterpret, redact } from "./recording";
 import { RemoteBackend } from "./remote";
+import { Models, costs, type Model } from "./models";
 export const hash = (s: string) => createHash("sha256").update(s).digest("hex");
+async function preview(file: string, name: string) {
+  if (!name.endsWith(".xlsx") && !name.endsWith(".csv"))
+    throw Error(
+      "Preview is available for CSV and XLSX files. Download this file to open it.",
+    );
+  const wb = new ExcelJS.Workbook();
+  if (file.endsWith(".xlsx")) await wb.xlsx.readFile(file);
+  else await wb.csv.readFile(file);
+  return {
+    name,
+    sheets: wb.worksheets.map((s) => ({
+      name: s.name,
+      rows:
+        s
+          .getRows(1, Math.min(s.rowCount, 101))
+          ?.map((r) =>
+            (r.values as any[])
+              .slice(1)
+              .map((v) => (typeof v === "object" ? JSON.stringify(v) : v)),
+          ) || [],
+    })),
+  };
+}
 export class Service {
   runtime: Runtime;
   remote: RemoteBackend;
+  models: Models;
   logins = new Map<string, BrowserContext>();
   timer?: NodeJS.Timeout;
   pairings = new Map<string, { owner: string; expires: number }>();
@@ -35,14 +60,18 @@ export class Service {
   ) {
     store.seed();
     this.remote = new RemoteBackend(store, secrets);
+    this.models = new Models(store, secrets);
     this.runtime = new Runtime(
       store,
       location,
       process.env.RELAY_HEADLESS === "1",
       secrets,
     );
+    this.runtime.predict = (owner, id, text) =>
+      this.models.predict(owner, id, text);
   }
   start() {
+    this.models.recover();
     for (const r of this.store.all<Run>("run"))
       if (r.location === this.location && r.state === "Running")
         this.store.put("run", {
@@ -55,6 +84,7 @@ export class Service {
   }
   async tick() {
     void deliverWebhooks(this.store);
+    void this.models.poll();
     for (const a of this.store.all<Agent>("agent")) {
       if (
         a.status === "Ready" &&
@@ -96,12 +126,40 @@ export class Service {
         "Use one browser account per workflow; split multi-account tasks into separate agents",
       );
     if (!a.workflow.steps.length) issues.push("Add at least one workflow step");
+    const allowed = this.store.allowedSites(owner);
+    for (const site of a.workflow.sites)
+      if (!allowed.includes(site))
+        issues.push(
+          `${sites.find((s) => s.id === site)?.name || site} is not approved for your team`,
+        );
     for (const s of a.workflow.steps) {
       if (s.recommendation === "Unsupported with current tools")
         issues.push(`${s.title}: choose a supported tool`);
       if (s.action === "human" && !s.assignedTo)
         issues.push(`${s.title}: assign a reviewer`);
-      if (
+      if (s.action === "model") {
+        const m = this.store.get<Model>("model", s.model || "");
+        if (
+          !m ||
+          m.state !== "Published" ||
+          m.team !== this.store.employee(owner).team
+        )
+          issues.push(`${s.title}: choose a published model for your team`);
+        else if (a.location !== this.location)
+          issues.push(
+            `${s.title}: published models are available to runs on this computer only`,
+          );
+      } else if (s.file?.startsWith("collection:")) {
+        try {
+          this.store.collection(s.file.slice(11), owner);
+          if (a.location !== this.location)
+            issues.push(
+              `${s.title}: team data collections are available to runs on this computer only`,
+            );
+        } catch {
+          issues.push(`${s.title}: this data collection is not available`);
+        }
+      } else if (
         ["upload", "spreadsheet"].includes(s.action) &&
         s.recommendation !== "Keep manual" &&
         !a.workflow.steps
@@ -286,8 +344,23 @@ export class Service {
         const employee = this.store.employee(owner);
         return {
           employee,
-          employees,
+          employees: this.store.employees(),
           sites,
+          allowedSites: this.store.allowedSites(owner),
+          collections: this.store
+            .all<Collection>("collection")
+            .filter((c) => c.team === employee.team)
+            .map(({ path, ...c }) => c),
+          models: this.store
+            .all<Model>("model")
+            .filter((m) => m.state === "Published" && m.team === employee.team)
+            .map(({ id, name, labels, textColumn, labelColumn }) => ({
+              id,
+              name,
+              labels,
+              textColumn,
+              labelColumn,
+            })),
           agents: this.store
             .all<Agent>("agent")
             .filter(
@@ -431,6 +504,8 @@ export class Service {
       case "connect": {
         const site = sites.find((s) => s.id === p.site);
         if (!site) throw Error("Website is not approved");
+        if (!this.store.allowedSites(owner).includes(site.id))
+          throw Error("Your admin has not approved this website for your team");
         const location = String(p.location || "local");
         if (location !== this.location)
           throw Error(
@@ -579,34 +654,160 @@ export class Service {
       case "artifact": {
         const a = this.store.get("artifact", id);
         if (!a || a.owner !== owner) throw Error("File not available");
-        if (p.preview) {
-          if (a.name.endsWith(".xlsx") || a.name.endsWith(".csv")) {
-            const wb = new ExcelJS.Workbook();
-            if (a.name.endsWith(".xlsx")) await wb.xlsx.readFile(a.path);
-            else await wb.csv.readFile(a.path);
-            return {
-              name: a.name,
-              sheets: wb.worksheets.map((s) => ({
-                name: s.name,
-                rows:
-                  s
-                    .getRows(1, Math.min(s.rowCount, 101))
-                    ?.map((r) =>
-                      (r.values as any[])
-                        .slice(1)
-                        .map((v) =>
-                          typeof v === "object" ? JSON.stringify(v) : v,
-                        ),
-                    ) || [],
-              })),
-            };
-          }
-          throw Error(
-            "Preview is available for CSV and XLSX files. Download this file to open it.",
-          );
-        }
+        if (p.preview) return preview(a.path, a.name);
         const data = await readFile(a.path);
         return { name: a.name, base64: data.toString("base64") };
+      }
+      case "collection": {
+        const c =
+          this.store.employee(owner).role === "admin"
+            ? this.store.get<Collection>("collection", id)
+            : this.store.collection(id, owner);
+        if (!c) throw Error("Data collection not found");
+        return preview(c.path, c.fileName);
+      }
+      case "admin": {
+        this.admin(owner);
+        return {
+          teams: this.store.all("team").map((t) => ({
+            ...t,
+            sites: t.sites || sites.map((s) => s.id),
+          })),
+          agents: this.store.all<Agent>("agent").map((a) => ({
+            id: a.id,
+            name: a.name,
+            description: a.description,
+            owner: a.owner,
+            team: a.team,
+            status: a.status,
+            shared: a.shared,
+            location: a.location,
+            sites: a.workflow.sites,
+            steps: a.workflow.steps.length,
+          })),
+          collections: this.store
+            .all<Collection>("collection")
+            .map(({ path, ...c }) => c),
+          requests: this.store.all("websiteRequest"),
+          models: this.store.all<Model>("model"),
+          provider: this.models.provider(),
+          costs: await costs(),
+        };
+      }
+      case "connectProvider":
+        this.admin(owner);
+        return this.models.connect(
+          owner,
+          z.string().min(8).max(500).parse(p.token),
+          p.namespace ? String(p.namespace) : undefined,
+        );
+      case "disconnectProvider":
+        this.admin(owner);
+        return this.models.disconnect();
+      case "modelPlan":
+        this.admin(owner);
+        return this.models.plan(p);
+      case "trainModel":
+        this.admin(owner);
+        return this.models.train(owner, p);
+      case "cancelModel":
+        this.admin(owner);
+        return this.models.cancel(id);
+      case "publishModel":
+        this.admin(owner);
+        return this.models.publish(owner, id, p);
+      case "unpublishModel":
+        this.admin(owner);
+        return this.models.unpublish(id);
+      case "predict":
+        return this.models.predict(owner, id, p.text);
+      case "setTeamSites": {
+        this.admin(owner);
+        const team = this.store.get("team", String(p.team));
+        if (!team) throw Error("Team not found");
+        const ids = sites.map((s) => s.id) as [string, ...string[]];
+        return this.store.put("team", {
+          ...team,
+          sites: z.array(z.enum(ids)).parse(p.sites),
+        });
+      }
+      case "moveMember": {
+        this.admin(owner);
+        const member = this.store.employee(id);
+        const team = this.store.get("team", String(p.team));
+        if (!team) throw Error("Team not found");
+        return this.store.transaction(() => {
+          for (const a of this.store
+            .all<Agent>("agent")
+            .filter((a) => a.owner === member.id))
+            this.store.put("agent", { ...a, team: team.id });
+          return this.store.put("employee", { ...member, team: team.id });
+        });
+      }
+      case "addCollection": {
+        this.admin(owner);
+        if (!this.store.get("team", String(p.team)))
+          throw Error("Choose a team");
+        const fileName = String(p.fileName || "")
+          .replace(/[^\w .-]/g, "_")
+          .replace(/\.(csv|xlsx)$/i, (ext) => ext.toLowerCase())
+          .slice(-120);
+        if (!/\.(csv|xlsx)$/.test(fileName))
+          throw Error("Choose a .csv or .xlsx file");
+        const bytes = Buffer.from(String(p.base64 || ""), "base64");
+        if (!bytes.length) throw Error("The selected file is empty");
+        if (bytes.length > 10_000_000) throw Error("Files must be under 10 MB");
+        const collectionId = randomUUID();
+        const dir = path.join(this.store.root, "collections", collectionId);
+        await mkdir(dir, { recursive: true, mode: 0o700 });
+        const file = path.join(dir, fileName);
+        await writeFile(file, bytes, { mode: 0o600 });
+        const wb = new ExcelJS.Workbook();
+        try {
+          if (fileName.endsWith(".xlsx")) await wb.xlsx.readFile(file);
+          else await wb.csv.readFile(file);
+          if (!wb.worksheets[0]) throw Error();
+        } catch {
+          await rm(dir, { recursive: true, force: true });
+          throw Error("Relay could not read this file as a table");
+        }
+        const sheet = wb.worksheets[0];
+        const { path: _, ...c } = this.store.put("collection", {
+          id: collectionId,
+          name: z.string().trim().min(1).max(100).parse(p.name),
+          description: z
+            .string()
+            .max(500)
+            .parse(p.description || ""),
+          team: String(p.team),
+          fileName,
+          path: file,
+          size: bytes.length,
+          columns: (sheet.getRow(1).values as any[])
+            .slice(1)
+            .map((v) => String(v ?? "")),
+          rows: Math.max(sheet.actualRowCount - 1, 0),
+          addedBy: owner,
+          created: new Date().toISOString(),
+        } satisfies Collection);
+        return c;
+      }
+      case "updateCollection": {
+        this.admin(owner);
+        const c = this.store.get<Collection>("collection", id);
+        if (!c) throw Error("Data collection not found");
+        if (!this.store.get("team", String(p.team)))
+          throw Error("Team not found");
+        this.store.put("collection", { ...c, team: String(p.team) });
+        return true;
+      }
+      case "removeCollection": {
+        this.admin(owner);
+        const c = this.store.get<Collection>("collection", id);
+        if (!c) throw Error("Data collection not found");
+        this.store.delete("collection", id);
+        await rm(path.dirname(c.path), { recursive: true, force: true });
+        return true;
       }
       case "pair": {
         const code = randomBytes(16).toString("hex");
@@ -653,12 +854,13 @@ export class Service {
         });
       }
       case "token": {
-        this.store.agent(String(p.agentId), owner, true);
+        if (p.modelId) this.models.access(owner, String(p.modelId));
+        else this.store.agent(String(p.agentId), owner, true);
         const secret = randomBytes(32).toString("base64url");
         this.store.put("token", {
           id: randomUUID(),
           owner,
-          agentId: p.agentId,
+          ...(p.modelId ? { modelId: p.modelId } : { agentId: p.agentId }),
           name: String(p.name || "Integration"),
           digest: hash(secret),
           created: new Date().toISOString(),
@@ -703,6 +905,10 @@ export class Service {
         };
       }
     }
+  }
+  admin(owner: string) {
+    if (this.store.employee(owner).role !== "admin")
+      throw Error("Admin access required");
   }
   async close() {
     if (this.timer) clearInterval(this.timer);

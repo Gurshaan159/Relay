@@ -1,6 +1,6 @@
 # Relay
 
-An Electron employee workspace for demonstrating browser workflows, running reusable agents, and keeping their useful results. The sidebar contains **My agents**, **Team agents**, and **Connections**. The Admin mode is intentionally a placeholder.
+An Electron employee workspace for demonstrating browser workflows, running reusable agents, and keeping their useful results. The sidebar contains **My agents**, **Team agents**, and **Connections**. Admins (the seeded **Alex Morgan** identity) can switch to **Admin** from the profile menu to manage **Teams**, **Approved websites**, **Data** and **Budget**.
 
 This repository contains working local and separately runnable backend/worker paths. It is not a publicly deployed service. Read [capabilities and limitations](docs/CAPABILITIES.md) before using it with real accounts.
 
@@ -85,7 +85,11 @@ Keys use Electron `safeStorage`. Linux refuses the insecure `basic_text` fallbac
 
 See [deployment and runner instructions](docs/DEPLOYMENT.md) and [authenticated API examples](docs/API.md). The backend is loopback-only by default. Hosted browser sign-in is performed explicitly on the hosted machine with `npm run seed -- connect alex`; local profiles are never uploaded.
 
-Approved sites and API authentication requirements are configured in [config/approved-sites.json](config/approved-sites.json). Add origins there and rebuild; there is no admin configuration screen. New configuration requires corresponding seeded employee permissions. Website requests are persisted as **Pending**, without simulated approval.
+The website catalog and API authentication requirements are configured in [config/approved-sites.json](config/approved-sites.json). Add origins there and rebuild. New configuration requires corresponding seeded employee permissions. In **Admin → Approved websites**, admins choose which catalog websites each team may connect accounts to; this is enforced when connecting, checking readiness and starting a run. Website requests are shown to admins as **Pending**, without simulated approval.
+
+**Admin → Data** stores CSV/XLSX collections (up to 10 MB) under `collections/` in the data directory, each assigned to one team. That team's upload and spreadsheet steps can select a collection as their file, for runs on this computer. Budgets are not available: Relay does not meter agent cost.
+
+**Admin → Data → Create a model** trains a text classifier from a collection with a text column and a category column (see [capabilities](docs/CAPABILITIES.md#models)). It needs a Hugging Face token with write access, entered in that flow and kept in OS secure storage. Training runs as a Hugging Face Job and publishing creates a Hugging Face Inference Endpoint; both are billed by Hugging Face to the connected account after explicit approval. A published model can be tried in Relay, used by the team's agents through the `model` step action, and called at `POST http://127.0.0.1:4319/models/MODEL_ID/predict` with a model-scoped token while the desktop app runs.
 
 ## Platform notes
 

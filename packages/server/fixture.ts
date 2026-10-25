@@ -30,7 +30,7 @@ export async function fixture(port = 4318) {
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url || "/", "http://localhost");
     const shell = (body: string) =>
-      `<!doctype html><html><head><title>Northstar Orders · Fixture</title><style>body{font:16px system-ui;background:#f4f7fa;color:#223347;max-width:900px;margin:60px auto}main{padding:40px;background:white;border:1px solid #dde4eb;border-radius:16px}button,a,input{font:inherit;padding:10px;margin:8px 0}button{background:#147d92;color:white;border:0;border-radius:7px}label{display:block}pre{white-space:pre-wrap}small{color:#617386}</style></head><body><main><small>RELAY FIXTURE · FICTIONAL DATA</small>${body}</main></body></html>`;
+      `<!doctype html><html><head><meta charset="utf-8"><title>Northstar Orders · Fixture</title><style>body{font:16px system-ui;background:#f4f7fa;color:#223347;max-width:900px;margin:60px auto}main{padding:40px;background:white;border:1px solid #dde4eb;border-radius:16px}button,a,input{font:inherit;padding:10px;margin:8px 0}button{background:#147d92;color:white;border:0;border-radius:7px}label{display:block}pre{white-space:pre-wrap}small{color:#617386}</style></head><body><main><small>RELAY FIXTURE · FICTIONAL DATA</small>${body}</main></body></html>`;
     if (url.pathname === "/login") {
       if (req.method === "POST") {
         const id = randomBytes(24).toString("hex");

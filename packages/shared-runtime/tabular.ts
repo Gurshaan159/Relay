@@ -18,12 +18,7 @@ const optionsSchema = z.object({
   sum: z.string().optional(),
   format: z.enum(["xlsx", "csv"]).default("xlsx"),
 });
-export async function tableFile(
-  input: string,
-  output: string,
-  options: unknown,
-) {
-  const spec = optionsSchema.parse(options);
+export async function readTable(input: string) {
   const book = new ExcelJS.Workbook();
   if (input.endsWith(".xlsx")) {
     const bytes = await readFile(input);
@@ -55,7 +50,7 @@ export async function tableFile(
   const columns = (sheet.getRow(1).values as any[]).slice(1).map(String);
   if (new Set(columns).size !== columns.length)
     throw Error("Column names must be unique");
-  let rows: Record<string, any>[] = [];
+  const rows: Record<string, any>[] = [];
   sheet.eachRow((row, i) => {
     if (i === 1) return;
     const record: Record<string, any> = {};
@@ -69,6 +64,15 @@ export async function tableFile(
     });
     rows.push(record);
   });
+  return { columns, rows };
+}
+export async function tableFile(
+  input: string,
+  output: string,
+  options: unknown,
+) {
+  const spec = optionsSchema.parse(options);
+  let { columns, rows } = await readTable(input);
   if (spec.filter)
     rows = rows.filter(
       (r) =>

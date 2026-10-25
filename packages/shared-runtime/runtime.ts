@@ -1,7 +1,7 @@
 import { tableFile } from "./tabular";
 import { chromium, type BrowserContext, type Page } from "playwright";
 import ExcelJS from "exceljs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -124,6 +124,7 @@ export class Runtime {
     { context: BrowserContext; page?: Page; lock: string }
   >();
   locks = new Set<string>();
+  predict?: (owner: string, id: string, text: string) => Promise<unknown>;
   constructor(
     public store: Store,
     public location = "local",
@@ -152,9 +153,10 @@ export class Runtime {
     await mkdir(workspace, { recursive: true, mode: 0o700 });
     try {
       const permissions = this.store.get("permission", run.owner);
+      const allowed = this.store.allowedSites(run.owner);
       for (const site of run.workflow.sites)
-        if (!permissions?.sites.includes(site))
-          throw Error("Website permission is missing");
+        if (!allowed.includes(site))
+          throw Error("Website is not approved for your team");
       for (const step of run.workflow.steps)
         if (!permissions?.tools.includes(step.action))
           throw Error(`Permission required: ${step.action}`);
@@ -318,7 +320,7 @@ export class Runtime {
               break;
             }
             case "spreadsheet": {
-              const source = run.outputs[s.file || ""] as any;
+              const source = await this.input(run, s, workspace);
               if (!source?.file)
                 throw Error("Choose an earlier downloaded workbook");
               const options = value.startsWith("{")
@@ -345,7 +347,7 @@ export class Runtime {
               break;
             }
             case "upload": {
-              const source = run.outputs[s.file || ""] as any;
+              const source = await this.input(run, s, workspace);
               if (!source?.file)
                 throw Error("Choose a file produced by an earlier step");
               await locate(page!, s.locator).setInputFiles(
@@ -419,6 +421,16 @@ export class Runtime {
               result = await response.json();
               break;
             }
+            case "model": {
+              if (!this.predict) throw Error("Models are unavailable here");
+              const source = s.file ? run.outputs[s.file] : value;
+              result = await this.predict(
+                run.owner,
+                s.model || "",
+                typeof source === "string" ? source : JSON.stringify(source),
+              );
+              break;
+            }
             case "transform": {
               const source = run.outputs[s.file || ""];
               if (!Array.isArray(source))
@@ -484,6 +496,13 @@ export class Runtime {
       }
       this.active.delete(id);
     }
+  }
+  async input(run: Run, s: Step, workspace: string): Promise<any> {
+    if (!s.file?.startsWith("collection:")) return run.outputs[s.file || ""];
+    const c = this.store.collection(s.file.slice(11), run.owner);
+    const name = `${s.id}-${c.fileName}`;
+    await copyFile(c.path, safeFile(workspace, name));
+    return { file: name };
   }
   async cancel(id: string) {
     const paused = this.paused.get(id);

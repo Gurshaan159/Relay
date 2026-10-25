@@ -15,6 +15,7 @@ export const actions = [
   "http",
   "transform",
   "tab",
+  "model",
 ] as const;
 export const stepSchema = z.object({
   id: z.string(),
@@ -38,6 +39,7 @@ export const stepSchema = z.object({
   assignedTo: z.string().optional(),
   condition: z.string().optional(),
   success: z.string().optional(),
+  model: z.string().optional(),
 });
 export const workflowSchema = z.object({
   steps: z.array(stepSchema).max(100),
@@ -80,17 +82,56 @@ export type Agent = z.infer<typeof agentSchema> & {
   team: string;
   version: number;
 };
-export const employees = [
-  { id: "alex", name: "Alex Morgan", team: "Operations", initials: "AM" },
-  { id: "jordan", name: "Jordan Lee", team: "Operations", initials: "JL" },
-  { id: "sam", name: "Sam Rivera", team: "Customer success", initials: "SR" },
+export type Employee = {
+  id: string;
+  name: string;
+  team: string;
+  initials: string;
+  role: "admin" | "employee";
+};
+export const employees: Employee[] = [
+  {
+    id: "alex",
+    name: "Alex Morgan",
+    team: "Operations",
+    initials: "AM",
+    role: "admin",
+  },
+  {
+    id: "jordan",
+    name: "Jordan Lee",
+    team: "Operations",
+    initials: "JL",
+    role: "employee",
+  },
+  {
+    id: "sam",
+    name: "Sam Rivera",
+    team: "Customer success",
+    initials: "SR",
+    role: "employee",
+  },
   {
     id: "taylor",
     name: "Taylor Chen",
     team: "Customer success",
     initials: "TC",
+    role: "employee",
   },
 ];
+export interface Collection {
+  id: string;
+  name: string;
+  description: string;
+  team: string;
+  fileName: string;
+  path: string;
+  size: number;
+  columns: string[];
+  rows: number;
+  addedBy: string;
+  created: string;
+}
 export const sites = z
   .array(
     z.object({
@@ -168,6 +209,21 @@ export const requestSchema = z.object({
     "revokeToken",
     "export",
     "openSource",
+    "admin",
+    "setTeamSites",
+    "moveMember",
+    "addCollection",
+    "updateCollection",
+    "removeCollection",
+    "collection",
+    "connectProvider",
+    "disconnectProvider",
+    "modelPlan",
+    "trainModel",
+    "cancelModel",
+    "publishModel",
+    "unpublishModel",
+    "predict",
   ]),
   payload: z.record(z.string(), z.unknown()).default({}),
 });

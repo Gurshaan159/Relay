@@ -31,6 +31,7 @@ import {
   Code,
   Anchor,
   MultiSelect,
+  FileInput,
 } from "@mantine/core";
 import {
   IconArrowRight,
@@ -56,6 +57,9 @@ import {
   IconBrowser,
   IconBolt,
   IconX,
+  IconWorld,
+  IconDatabase,
+  IconCoin,
 } from "@tabler/icons-react";
 import "@mantine/core/styles.css";
 import "./style.css";
@@ -105,6 +109,8 @@ function App() {
   const [error, setError] = useState("");
   const [settings, setSettings] = useState(false);
   const [admin, setAdmin] = useState(false);
+  const [adminPage, setAdminPage] = useState("Teams");
+  const [adminVisit, setAdminVisit] = useState(0);
   const [busy, setBusy] = useState(false);
   const [runAgent, setRunAgent] = useState<Agent>();
   const [inputs, setInputs] = useState<Record<string, string>>({});
@@ -164,15 +170,32 @@ function App() {
           </Text>
         </Group>
         <Stack gap={6}>
-          {[
-            ["My agents", IconStack2],
-            ["Team agents", IconUsers],
-            ["Connections", IconPlug],
-          ].map(([label, Icon]: any) => (
+          {admin && (
+            <Text size="xs" c="teal" fw={700} tt="uppercase" px={12} mb={4}>
+              Admin
+            </Text>
+          )}
+          {(admin
+            ? [
+                ["Teams", IconUsers],
+                ["Approved websites", IconWorld],
+                ["Data", IconDatabase],
+                ["Budget", IconCoin],
+              ]
+            : [
+                ["My agents", IconStack2],
+                ["Team agents", IconUsers],
+                ["Connections", IconPlug],
+              ]
+          ).map(([label, Icon]: any) => (
             <button
               key={label}
-              className={`nav ${page === label ? "active" : ""}`}
-              onClick={() => nav(label)}
+              className={`nav ${(admin ? adminPage : page) === label ? "active" : ""}`}
+              onClick={() => {
+                if (!admin) return nav(label);
+                setAdminPage(label);
+                setAdminVisit((n) => n + 1);
+              }}
             >
               <Icon size={20} />
               {label}
@@ -218,16 +241,30 @@ function App() {
                       setWizard(undefined);
                       setRunAgent(undefined);
                       setSettings(false);
+                      setAdmin(false);
                       setError("");
                     })
                   }
                 >
                   {e.name} · {e.team}
+                  {e.role === "admin" && " · Admin"}
                 </Menu.Item>
               ))}
-              <Menu.Divider />
-              <Menu.Item onClick={() => setAdmin(false)}>Employee</Menu.Item>
-              <Menu.Item onClick={() => setAdmin(true)}>Admin</Menu.Item>
+              {data.employee.role === "admin" && (
+                <>
+                  <Menu.Divider />
+                  <Menu.Item onClick={() => setAdmin(false)}>Employee</Menu.Item>
+                  <Menu.Item
+                    onClick={() => {
+                      setAdmin(true);
+                      setAdminPage("Teams");
+                      setError("");
+                    }}
+                  >
+                    Admin
+                  </Menu.Item>
+                </>
+              )}
             </Menu.Dropdown>
           </Menu>
         </div>
@@ -236,7 +273,7 @@ function App() {
         <div className="topbar">
           <Text size="sm" c="dimmed">
             Northstar Supply <span className="slash">/</span>{" "}
-            {data.employee.team}
+            {admin ? "Admin" : data.employee.team}
           </Text>
           <Badge variant="light" color="gray">
             Demo workspace
@@ -254,14 +291,14 @@ function App() {
               {error}
             </Alert>
           )}
-          {admin ? (
-            <div className="empty">
-              <IconUsers size={40} />
-              <Title order={2}>Admin workspace coming later</Title>
-              <Button onClick={() => setAdmin(false)}>
-                Return to Employee
-              </Button>
-            </div>
+          {admin && data.employee.role === "admin" ? (
+            <Admin
+              key={adminVisit}
+              page={adminPage}
+              setPage={setAdminPage}
+              data={data}
+              act={act}
+            />
           ) : wizard !== undefined ? (
             <Wizard
               initial={wizard}
@@ -560,10 +597,18 @@ function Connections({ data, act }: any) {
         />
       </Group>
       <Stack>
+        {!data.allowedSites.length && (
+          <Empty
+            title="No websites approved yet"
+            text="Your admin chooses which websites your team can connect accounts to."
+          />
+        )}
         {data.sites.map((site: any) => {
           const c = data.connections.find(
             (c: any) => c.site === site.id && c.location === location,
           );
+          const approved = data.allowedSites.includes(site.id);
+          if (!approved && !c) return null;
           return (
             <Paper withBorder p="xl" radius="lg" key={site.id}>
               <Group justify="space-between">
@@ -578,8 +623,10 @@ function Connections({ data, act }: any) {
                     </Text>
                   </div>
                 </Group>
-                <Badge color={c ? "teal" : "orange"}>
-                  {c?.status || "Needs connection"}
+                <Badge color={!approved ? "gray" : c ? "teal" : "orange"}>
+                  {!approved
+                    ? "No longer approved"
+                    : c?.status || "Needs connection"}
                 </Badge>
               </Group>
               <Divider my="lg" />
@@ -589,7 +636,9 @@ function Connections({ data, act }: any) {
                     {c?.account || "Sign in directly in a dedicated browser."}
                   </Text>
                   <Text size="xs" c="dimmed" mt={4}>
-                    Available to your runs that require this website.
+                    {approved
+                      ? "Available to your runs that require this website."
+                      : "Your admin removed this website for your team. Agents can’t use it."}
                   </Text>
                 </div>
                 {c ? (
@@ -1239,6 +1288,1433 @@ function Detail({ agent: a, data, act, run, back, edit }: any) {
     </>
   );
 }
+const plural = (n: number, word: string) =>
+  `${n} ${n === 1 ? word : word.endsWith("y") ? `${word.slice(0, -1)}ies` : `${word}s`}`;
+const toBase64 = async (file: File) => {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let text = "";
+  for (let i = 0; i < bytes.length; i += 0x8000)
+    text += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(text);
+};
+function Admin({ page, setPage, data, act }: any) {
+  const [state, setState] = useState<any>();
+  const [team, setTeam] = useState<string>();
+  const [moving, setMoving] = useState<{ member: any; team: string }>();
+  const [adding, setAdding] = useState(false);
+  const [removing, setRemoving] = useState<any>();
+  const [preview, setPreview] = useState<any>();
+  const [modelView, setModelView] = useState<{
+    collectionId?: string;
+    modelId?: string;
+  }>();
+  const load = () => api("admin").then(setState);
+  const change = (fn: () => Promise<any>) =>
+    act(async () => {
+      const value = await fn();
+      await load();
+      return value;
+    });
+  useEffect(() => {
+    load().catch(() => {});
+    setTeam(undefined);
+    setModelView(undefined);
+  }, [page]);
+  const active = state?.models.some((m: any) =>
+    ["Preparing", "Training", "Publishing"].includes(m.state),
+  );
+  useEffect(() => {
+    if (!active) return;
+    const timer = setInterval(() => load().catch(() => {}), 5000);
+    return () => clearInterval(timer);
+  }, [active]);
+  if (!state)
+    return (
+      <div className="empty">
+        <Loader />
+      </div>
+    );
+  const name = (id: string) =>
+    data.employees.find((e: any) => e.id === id)?.name || id;
+  const teamOptions = state.teams.map((t: any) => ({
+    value: t.id,
+    label: t.name,
+  }));
+  const of = (id: string) => ({
+    members: data.employees.filter((e: any) => e.team === id),
+    agents: state.agents.filter((a: any) => a.team === id),
+    sites: data.sites.filter((s: any) =>
+      state.teams.find((t: any) => t.id === id)?.sites.includes(s.id),
+    ),
+    collections: state.collections.filter((c: any) => c.team === id),
+  });
+  const toggleSite = (t: any, site: string, on: boolean) =>
+    change(() =>
+      api("setTeamSites", {
+        team: t.id,
+        sites: on
+          ? [...t.sites, site]
+          : t.sites.filter((s: string) => s !== site),
+      }),
+    );
+  const header = (title: string, text: string, action?: React.ReactNode) => (
+    <Group justify="space-between" mb={30}>
+      <div>
+        <Title order={1}>{title}</Title>
+        <Text c="dimmed" mt={6}>
+          {text}
+        </Text>
+      </div>
+      {action}
+    </Group>
+  );
+  const selected = state.teams.find((t: any) => t.id === team);
+  let body: React.ReactNode;
+  if (page === "Teams" && selected) {
+    const t = of(selected.id);
+    body = (
+      <>
+        <Button
+          variant="subtle"
+          color="gray"
+          leftSection={<IconArrowLeft size={16} />}
+          onClick={() => setTeam(undefined)}
+          px={0}
+          mb="lg"
+        >
+          Back to teams
+        </Button>
+        {header(
+          selected.name,
+          `${plural(t.members.length, "member")} · ${plural(t.agents.length, "agent")} · ${plural(t.sites.length, "approved website")} · ${plural(t.collections.length, "data collection")}`,
+        )}
+        <Stack gap="xl">
+          <Paper withBorder radius="lg" className="agent-list">
+            <Group justify="space-between" px={24} pt={22}>
+              <Title order={3}>Members</Title>
+            </Group>
+            {t.members.map((m: any) => (
+              <div className="agent-row" key={m.id}>
+                <Avatar color="teal" radius="xl">
+                  {m.initials}
+                </Avatar>
+                <div style={{ flex: 1 }}>
+                  <Text fw={650}>{m.name}</Text>
+                  <Text size="sm" c="dimmed" mt={4}>
+                    {plural(
+                      state.agents.filter((a: any) => a.owner === m.id).length,
+                      "agent",
+                    )}
+                  </Text>
+                </div>
+                {m.role === "admin" && (
+                  <Badge variant="light" color="gray">
+                    Admin
+                  </Badge>
+                )}
+                <Select
+                  aria-label={`Team for ${m.name}`}
+                  value={m.team}
+                  data={teamOptions}
+                  allowDeselect={false}
+                  onChange={(v) =>
+                    v && v !== m.team && setMoving({ member: m, team: v })
+                  }
+                />
+              </div>
+            ))}
+            {!t.members.length && (
+              <Text size="sm" c="dimmed" px={24} py={22}>
+                No one is on this team.
+              </Text>
+            )}
+          </Paper>
+          <Paper withBorder radius="lg" className="agent-list">
+            <Group justify="space-between" px={24} pt={22}>
+              <Title order={3}>Agents</Title>
+            </Group>
+            {t.agents.map((a: any) => (
+              <div className="agent-row" key={a.id}>
+                <div className="agent-icon">
+                  <IconBrowser size={24} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <Text fw={650}>{a.name}</Text>
+                  <Text size="sm" c="dimmed" mt={4}>
+                    Owned by {name(a.owner)} · {plural(a.steps, "step")}
+                    {a.sites.length
+                      ? ` · ${a.sites
+                          .map(
+                            (id: string) =>
+                              data.sites.find((s: any) => s.id === id)?.name ||
+                              id,
+                          )
+                          .join(", ")}`
+                      : ""}
+                  </Text>
+                </div>
+                <Badge variant="light" color={a.shared ? "teal" : "gray"}>
+                  {a.shared ? "Shared with team" : "Private to owner"}
+                </Badge>
+                <Badge variant="light" color={color(a.status)}>
+                  {a.status}
+                </Badge>
+              </div>
+            ))}
+            {!t.agents.length && (
+              <Text size="sm" c="dimmed" px={24} py={22}>
+                This team has no agents yet.
+              </Text>
+            )}
+          </Paper>
+          <Text size="xs" c="dimmed" mt={-12}>
+            Only an agent’s owner can edit it. Teammates can run shared agents
+            with their own connected accounts.
+          </Text>
+          <Paper withBorder p="xl" radius="lg">
+            <Title order={3}>Approved websites</Title>
+            <Text size="sm" c="dimmed" mt={4} mb="md">
+              Members can connect accounts only to these websites.
+            </Text>
+            <Stack gap="sm">
+              {data.sites.map((s: any) => (
+                <Checkbox
+                  key={s.id}
+                  label={s.name}
+                  description={new URL(s.origin).host}
+                  checked={selected.sites.includes(s.id)}
+                  onChange={(e) =>
+                    toggleSite(selected, s.id, e.currentTarget.checked)
+                  }
+                />
+              ))}
+            </Stack>
+          </Paper>
+          <Paper withBorder p="xl" radius="lg">
+            <Group justify="space-between">
+              <Title order={3}>Data collections</Title>
+              <Button variant="default" onClick={() => setPage("Data")}>
+                Manage data
+              </Button>
+            </Group>
+            <Stack gap={6} mt="md">
+              {t.collections.map((c: any) => (
+                <Text size="sm" key={c.id}>
+                  {c.name}{" "}
+                  <Text span size="sm" c="dimmed">
+                    · {c.fileName} · {plural(c.rows, "row")}
+                  </Text>
+                </Text>
+              ))}
+              {!t.collections.length && (
+                <Text size="sm" c="dimmed">
+                  No data collections are shared with this team.
+                </Text>
+              )}
+            </Stack>
+          </Paper>
+          <Paper withBorder p="xl" radius="lg">
+            <Group justify="space-between">
+              <Title order={3}>Budget</Title>
+              <Badge variant="light" color="gray">
+                Not available yet
+              </Badge>
+            </Group>
+            <Text size="sm" c="dimmed" mt={4}>
+              Relay doesn’t measure agent costs yet, so this team has no
+              spending limit.
+            </Text>
+          </Paper>
+        </Stack>
+      </>
+    );
+  } else if (page === "Teams")
+    body = (
+      <>
+        {header("Teams", "Who is on each team and what they can use.")}
+        <Paper withBorder radius="lg" className="agent-list">
+          {state.teams.map((team: any) => {
+            const t = of(team.id);
+            return (
+              <div className="agent-row" key={team.id}>
+                <div className="agent-icon">
+                  <IconUsers size={24} />
+                </div>
+                <button
+                  className="agent-title"
+                  onClick={() => setTeam(team.id)}
+                >
+                  <Text fw={650}>{team.name}</Text>
+                  <Text size="sm" c="dimmed" mt={4}>
+                    {plural(t.members.length, "member")} ·{" "}
+                    {plural(t.agents.length, "agent")} ·{" "}
+                    {plural(t.sites.length, "approved website")} ·{" "}
+                    {plural(t.collections.length, "data collection")}
+                  </Text>
+                </button>
+                <Button variant="light" onClick={() => setTeam(team.id)}>
+                  View team
+                </Button>
+              </div>
+            );
+          })}
+        </Paper>
+      </>
+    );
+  else if (page === "Approved websites")
+    body = (
+      <>
+        {header(
+          "Approved websites",
+          "Choose which websites each team can connect accounts to.",
+        )}
+        <Stack>
+          {data.sites.map((s: any) => (
+            <Paper withBorder p="xl" radius="lg" key={s.id}>
+              <Group>
+                <div className="agent-icon">
+                  <IconWorld />
+                </div>
+                <div>
+                  <Text fw={600}>{s.name}</Text>
+                  <Text size="sm" c="dimmed">
+                    {new URL(s.origin).host} ·{" "}
+                    {s.type === "api" ? "API key or token" : "Browser sign-in"}
+                  </Text>
+                </div>
+              </Group>
+              <Divider my="lg" />
+              <Text size="sm" fw={550} mb="sm">
+                Available to
+              </Text>
+              <Group>
+                {state.teams.map((t: any) => (
+                  <Checkbox
+                    key={t.id}
+                    label={t.name}
+                    checked={t.sites.includes(s.id)}
+                    onChange={(e) =>
+                      toggleSite(t, s.id, e.currentTarget.checked)
+                    }
+                  />
+                ))}
+              </Group>
+            </Paper>
+          ))}
+          <Text size="xs" c="dimmed">
+            Removing a website stops that team’s agents from using it. Employees
+            stay signed in on their own computer until they disconnect. Relay
+            never shows admins employees’ passwords or sessions.
+          </Text>
+          <Paper withBorder p="xl" radius="lg">
+            <Title order={3}>Requested by employees</Title>
+            <Text size="sm" c="dimmed" mt={4}>
+              Before a new website can be approved, the person who deploys Relay
+              has to add its sign-in details to the website catalog.
+            </Text>
+            {state.requests.map((r: any) => (
+              <Group mt="md" key={r.id}>
+                <Text size="sm">{r.origin}</Text>
+                <Text size="sm" c="dimmed">
+                  {name(r.owner)}
+                </Text>
+                <Badge color="gray">{r.status}</Badge>
+              </Group>
+            ))}
+            {!state.requests.length && (
+              <Text size="sm" mt="md">
+                No requests right now.
+              </Text>
+            )}
+          </Paper>
+        </Stack>
+      </>
+    );
+  else if (page === "Data" && modelView)
+    body = (
+      <ModelPage
+        key={modelView.modelId || modelView.collectionId}
+        view={modelView}
+        open={setModelView}
+        state={state}
+        data={data}
+        act={act}
+        change={change}
+      />
+    );
+  else if (page === "Data")
+    body = (
+      <>
+        {header(
+          "Data",
+          "Spreadsheets a team’s agents can use.",
+          <Button
+            leftSection={<IconPlus size={18} />}
+            size="md"
+            onClick={() => setAdding(true)}
+          >
+            Add collection
+          </Button>,
+        )}
+        <Text size="sm" mb="lg">
+          A data collection is a CSV or Excel file shared with one team. That
+          team’s agents can upload it to a website or filter it in a spreadsheet
+          step.
+        </Text>
+        {state.collections.length ? (
+          <Paper withBorder radius="lg" className="agent-list">
+            {state.collections.map((c: any) => (
+              <div className="agent-row" key={c.id}>
+                <div className="agent-icon">
+                  <IconFile size={24} />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <Text fw={650}>{c.name}</Text>
+                  {c.description && (
+                    <Text size="sm" mt={4}>
+                      {c.description}
+                    </Text>
+                  )}
+                  <Text size="sm" c="dimmed" mt={4} truncate>
+                    {c.fileName} · {plural(c.rows, "row")} · Columns:{" "}
+                    {c.columns.join(", ") || "none"}
+                  </Text>
+                </div>
+                <Select
+                  aria-label={`Team for ${c.name}`}
+                  value={c.team}
+                  data={teamOptions}
+                  allowDeselect={false}
+                  onChange={(v) =>
+                    v &&
+                    change(() =>
+                      api("updateCollection", { id: c.id, team: v }),
+                    )
+                  }
+                />
+                <Button
+                  variant="default"
+                  onClick={() =>
+                    act(async () =>
+                      setPreview(await api("collection", { id: c.id })),
+                    )
+                  }
+                >
+                  Preview
+                </Button>
+                <Button
+                  variant="light"
+                  onClick={() => setModelView({ collectionId: c.id })}
+                >
+                  Create a model
+                </Button>
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  aria-label={`Remove ${c.name}`}
+                  onClick={() => setRemoving(c)}
+                >
+                  <IconTrash size={18} />
+                </ActionIcon>
+              </div>
+            ))}
+          </Paper>
+        ) : (
+          <Empty
+            title="No data collections yet"
+            text="Add a CSV or Excel file and choose the team that can use it."
+          />
+        )}
+        {state.models.length > 0 && (
+          <>
+            <Title order={3} mt={36} mb="md">
+              Models
+            </Title>
+            <Paper withBorder radius="lg" className="agent-list">
+              {state.models.map((m: any) => (
+                <div className="agent-row" key={m.id}>
+                  <div className="agent-icon">
+                    <IconBolt size={24} />
+                  </div>
+                  <button
+                    className="agent-title"
+                    onClick={() => setModelView({ modelId: m.id })}
+                  >
+                    <Text fw={650}>{m.name}</Text>
+                    <Text size="sm" c="dimmed" mt={4}>
+                      Picks a “{m.labelColumn}” from a “{m.textColumn}” ·{" "}
+                      {m.team}
+                    </Text>
+                  </button>
+                  <Badge variant="light" color={modelColor(m.state)}>
+                    {m.state}
+                  </Badge>
+                </div>
+              ))}
+            </Paper>
+          </>
+        )}
+        {state.provider.connected && (
+          <Group mt="lg" gap="xs">
+            <Text size="xs" c="dimmed">
+              Hugging Face connected as {state.provider.account} · billed to{" "}
+              {state.provider.namespace}
+            </Text>
+            <Anchor
+              size="xs"
+              component="button"
+              onClick={() => change(() => api("disconnectProvider"))}
+            >
+              Disconnect
+            </Anchor>
+          </Group>
+        )}
+      </>
+    );
+  else
+    body = (
+      <>
+        {header("Budget", "Spending limits for agents.")}
+        <Paper withBorder radius="lg" className="empty">
+          <div className="agent-icon">
+            <IconCoin size={25} />
+          </div>
+          <Title order={3}>Budgets aren’t available yet</Title>
+          <Text size="sm" c="dimmed" maw={520}>
+            Relay doesn’t measure what agent runs cost yet, so there’s nothing a
+            budget could limit. Agents currently run without a spending limit.
+          </Text>
+        </Paper>
+      </>
+    );
+  return (
+    <>
+      {body}
+      <Modal
+        opened={!!moving}
+        onClose={() => setMoving(undefined)}
+        title={`Move ${moving?.member.name}?`}
+        centered
+      >
+        <Text mb="sm">
+          {moving?.member.name} will join{" "}
+          {state.teams.find((t: any) => t.id === moving?.team)?.name}.
+        </Text>
+        <Text size="sm" c="dimmed" mb="lg">
+          Their agents move with them, and shared agents become available to
+          the new team. They keep their own connected accounts, but can only use
+          websites and data approved for the new team.
+        </Text>
+        <Group justify="flex-end">
+          <Button variant="default" onClick={() => setMoving(undefined)}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() =>
+              change(async () => {
+                await api("moveMember", {
+                  id: moving!.member.id,
+                  team: moving!.team,
+                });
+                setMoving(undefined);
+              })
+            }
+          >
+            Move member
+          </Button>
+        </Group>
+      </Modal>
+      <Modal
+        opened={!!removing}
+        onClose={() => setRemoving(undefined)}
+        title="Remove this data collection?"
+        centered
+      >
+        <Text mb="lg">
+          This deletes “{removing?.name}”. Agents that use it will need a
+          different file before they can run.
+        </Text>
+        <Group justify="flex-end">
+          <Button variant="default" onClick={() => setRemoving(undefined)}>
+            Keep collection
+          </Button>
+          <Button
+            color="red"
+            onClick={() =>
+              change(async () => {
+                await api("removeCollection", { id: removing!.id });
+                setRemoving(undefined);
+              })
+            }
+          >
+            Remove collection
+          </Button>
+        </Group>
+      </Modal>
+      <AddCollection
+        opened={adding}
+        close={() => setAdding(false)}
+        teams={teamOptions}
+        change={change}
+      />
+      <Modal
+        opened={!!preview}
+        onClose={() => setPreview(undefined)}
+        title={preview?.name}
+        size="xl"
+      >
+        <Stack>
+          {preview?.sheets.map((sheet: any) => (
+            <ScrollArea key={sheet.name}>
+              <Table striped>
+                <Table.Tbody>
+                  {sheet.rows.map((row: any[], i: number) => (
+                    <Table.Tr key={i}>
+                      {row.map((cell, j) => (
+                        <Table.Td key={j}>{String(cell ?? "")}</Table.Td>
+                      ))}
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            </ScrollArea>
+          ))}
+          <Text size="xs" c="dimmed">
+            Preview shows the first 100 rows.
+          </Text>
+        </Stack>
+      </Modal>
+    </>
+  );
+}
+const modelColor = (s: string) =>
+  s === "Published" || s === "Evaluated"
+    ? "teal"
+    : s === "Failed"
+      ? "red"
+      : s === "Cancelled"
+        ? "gray"
+        : "orange";
+const usd = (n: number) =>
+  `$${n < 1 ? n.toFixed(n < 0.01 ? 4 : 2) : n.toFixed(2)}`;
+const percent = (n: number) => `${Math.round(n * 100)}%`;
+function Fact({ label, children }: any) {
+  return (
+    <Group align="flex-start" wrap="nowrap" gap="lg">
+      <Text size="sm" c="dimmed" w={150} style={{ flexShrink: 0 }}>
+        {label}
+      </Text>
+      <div style={{ flex: 1 }}>{children}</div>
+    </Group>
+  );
+}
+function ModelPage({ view, open, state, data, act, change }: any) {
+  const model = state.models.find((m: any) => m.id === view.modelId);
+  const [stage, setStage] = useState(0);
+  const [plan, setPlan] = useState<any>();
+  const [columns, setColumns] = useState<{ text?: string; label?: string }>({});
+  const [goal, setGoal] = useState("");
+  const [recommended, setRecommended] = useState(false);
+  const [name, setName] = useState("");
+  const [flavor, setFlavor] = useState<string | null>(null);
+  const [hosting, setHosting] = useState<string | null>(null);
+  const [approved, setApproved] = useState(false);
+  const [namespace, setNamespace] = useState("");
+  const [tryText, setTryText] = useState("");
+  const [answer, setAnswer] = useState<any>();
+  const [token, setToken] = useState("");
+  const secret = useRef<HTMLInputElement>(null);
+  const collectionId = model?.collectionId || view.collectionId;
+  const textColumn = columns.text || plan?.textColumn;
+  const labelColumn = columns.label || plan?.labelColumn;
+  const autoGoal =
+    textColumn && labelColumn
+      ? `Sort each “${textColumn}” into a “${labelColumn}”`
+      : "";
+  const chosenGoal = recommended ? autoGoal : goal;
+  useEffect(() => {
+    if (model) return;
+    const timer = setTimeout(
+      () =>
+        api("modelPlan", {
+          collectionId,
+          textColumn: columns.text,
+          labelColumn: columns.label,
+          goal: chosenGoal,
+        })
+          .then((p) => {
+            setPlan(p);
+            setFlavor((f) => f || p.training[0]?.flavor || null);
+          })
+          .catch(() => {}),
+      300,
+    );
+    return () => clearTimeout(timer);
+  }, [collectionId, columns.text, columns.label, chosenGoal, model?.id]);
+  const active = model
+    ? model.state === "Published"
+      ? 5
+      : ["Evaluated", "Publishing"].includes(model.state)
+        ? 4
+        : 3
+    : stage;
+  const training = plan?.training.find((t: any) => t.flavor === flavor);
+  const host = state.costs.hosting.find(
+    (h: any) => h.id === (hosting || state.costs.hosting[0]?.id),
+  );
+  const goalFits = recommended || plan?.goal?.fit === "classification";
+  const options = (plan?.columns || []).map((c: string) => ({
+    value: c,
+    label: c,
+  }));
+  const back = (
+    <Button
+      variant="subtle"
+      color="gray"
+      leftSection={<IconArrowLeft size={16} />}
+      onClick={() => open(undefined)}
+      px={0}
+      mb="lg"
+    >
+      Back to data
+    </Button>
+  );
+  if (!model && !plan)
+    return (
+      <>
+        {back}
+        <div className="empty">
+          <Loader />
+          <Text c="dimmed">Reading the spreadsheet…</Text>
+        </div>
+      </>
+    );
+  const approval = (text: string) => (
+    <Checkbox
+      label={text}
+      checked={approved}
+      onChange={(e) => setApproved(e.currentTarget.checked)}
+    />
+  );
+  const budgetNote = (
+    <Text size="xs" c="dimmed">
+      Hugging Face bills these charges to {state.provider.namespace || "the connected account"}.
+      Relay doesn’t track or limit spending yet, so they aren’t counted against
+      an admin budget.
+    </Text>
+  );
+  return (
+    <>
+      {back}
+      <Group justify="space-between" align="flex-start" mb="xl">
+        <div>
+          <Text size="xs" c="teal" fw={700} tt="uppercase" mb={6}>
+            Create a model
+          </Text>
+          <Group>
+            <Title order={1}>
+              {model?.name || plan?.collection.name}
+            </Title>
+            {model && (
+              <Badge variant="light" color={modelColor(model.state)}>
+                {model.state}
+              </Badge>
+            )}
+          </Group>
+          <Text c="dimmed" mt={6}>
+            {model
+              ? model.goal
+              : `${plan.collection.fileName} · ${plural(plan.collection.rows, "row")} · ${plan.collection.team}`}
+          </Text>
+        </div>
+      </Group>
+      <Stepper active={active} size="sm" mb={36}>
+        {["Data", "Goal", "Plan", "Train", "Publish", "Use"].map((label) => (
+          <Stepper.Step key={label} label={label} />
+        ))}
+      </Stepper>
+      {!model && stage === 0 && (
+        <Paper p={32} withBorder radius="lg">
+          <Stack gap="lg">
+            <div>
+              <Title order={2}>Check the data</Title>
+              <Text size="sm" c="dimmed" mt={6}>
+                Relay can train one kind of model: it reads a piece of text and
+                picks one category. Each row needs the text and its correct
+                category.
+              </Text>
+            </div>
+            <Group grow>
+              <Select
+                label="Text the model reads"
+                data={options}
+                value={textColumn || null}
+                onChange={(v) => setColumns((c) => ({ ...c, text: v || "" }))}
+              />
+              <Select
+                label="Correct category"
+                data={options}
+                value={labelColumn || null}
+                onChange={(v) => setColumns((c) => ({ ...c, label: v || "" }))}
+              />
+            </Group>
+            <Paper withBorder radius="md">
+              <ScrollArea>
+                <Table striped>
+                  <Table.Thead>
+                    <Table.Tr>
+                      {plan.columns.map((c: string) => (
+                        <Table.Th key={c}>{c}</Table.Th>
+                      ))}
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {plan.sample.map((row: any, i: number) => (
+                      <Table.Tr key={i}>
+                        {plan.columns.map((c: string) => (
+                          <Table.Td key={c}>{row[c]}</Table.Td>
+                        ))}
+                      </Table.Tr>
+                    ))}
+                  </Table.Tbody>
+                </Table>
+              </ScrollArea>
+            </Paper>
+            {plan.check.ok ? (
+              <Alert color="teal" title="This data fits text classification">
+                <Text size="sm">
+                  {plural(plan.counts.train + plan.counts.eval, "usable example")}{" "}
+                  across {plural(plan.check.labels.length, "category")}:{" "}
+                  {plan.check.labels
+                    .map((l: any) => `${l.label} (${l.count})`)
+                    .join(", ")}
+                  .
+                </Text>
+                {(plan.check.ignored > 0 || plan.check.duplicates > 0) && (
+                  <Text size="sm" mt={6}>
+                    {plan.check.ignored > 0 &&
+                      `${plural(plan.check.ignored, "blank row")} will be skipped. `}
+                    {plan.check.duplicates > 0 &&
+                      `${plural(plan.check.duplicates, "repeated text")} will be used once.`}
+                  </Text>
+                )}
+              </Alert>
+            ) : (
+              <Alert color="orange" title="This data can’t be used yet">
+                <Stack gap="sm">
+                  {plan.check.problems.map((p: any) => (
+                    <div key={p.issue}>
+                      <Text size="sm" fw={600}>
+                        {p.issue}
+                      </Text>
+                      <Text size="sm">{p.fix}</Text>
+                    </div>
+                  ))}
+                </Stack>
+              </Alert>
+            )}
+            <Group justify="flex-end">
+              <Button disabled={!plan.check.ok} onClick={() => setStage(1)}>
+                Continue
+              </Button>
+            </Group>
+          </Stack>
+        </Paper>
+      )}
+      {!model && stage === 1 && (
+        <Paper p={32} withBorder radius="lg">
+          <Stack gap="lg">
+            <Title order={2}>What should the model do?</Title>
+            {plan.suggestion?.textColumn === textColumn &&
+              plan.suggestion?.labelColumn === labelColumn && (
+                <Paper withBorder p="lg" radius="md">
+                  <Group justify="space-between" wrap="nowrap">
+                    <div>
+                      <Text fw={600}>Recommended: {autoGoal}</Text>
+                      <Text size="sm" c="dimmed" mt={4}>
+                        {plan.suggestion.reason}
+                      </Text>
+                    </div>
+                    <Button
+                      variant={recommended ? "filled" : "light"}
+                      leftSection={recommended && <IconCheck size={16} />}
+                      onClick={() => setRecommended(!recommended)}
+                    >
+                      {recommended ? "Chosen" : "Use this"}
+                    </Button>
+                  </Group>
+                </Paper>
+              )}
+            <Textarea
+              label="Or describe your goal"
+              placeholder={`e.g. Send each new ${textColumn} to the right ${labelColumn}`}
+              minRows={2}
+              disabled={recommended}
+              value={goal}
+              onChange={(e) => setGoal(e.target.value)}
+            />
+            {!recommended && goal.trim() && plan.goal && (
+              <Alert
+                color={plan.goal.fit === "classification" ? "teal" : "orange"}
+              >
+                {plan.goal.message}
+              </Alert>
+            )}
+            <Group justify="space-between">
+              <Button variant="default" onClick={() => setStage(0)}>
+                Back
+              </Button>
+              <Button disabled={!goalFits} onClick={() => setStage(2)}>
+                Review plan
+              </Button>
+            </Group>
+          </Stack>
+        </Paper>
+      )}
+      {!model && stage === 2 && (
+        <Paper p={32} withBorder radius="lg">
+          <Stack gap="lg">
+            <Title order={2}>Review the plan</Title>
+            <TextInput
+              label="Model name"
+              placeholder={`${plan.collection.name} classifier`}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+            <Stack gap="sm">
+              <Fact label="Goal">
+                <Text size="sm">{chosenGoal}</Text>
+              </Fact>
+              <Fact label="Spreadsheet">
+                <Text size="sm">
+                  {plan.collection.fileName} · text from “{textColumn}”,
+                  category from “{labelColumn}”
+                </Text>
+              </Fact>
+              <Fact label="Base model">
+                <Text size="sm">
+                  {plan.baseModel} — open-source (Apache 2.0), trained on
+                  English text
+                </Text>
+              </Fact>
+              <Fact label="Accepts">
+                <Text size="sm">
+                  One piece of text, like a “{textColumn}”. About the first 100
+                  words are used.
+                </Text>
+              </Fact>
+              <Fact label="Returns">
+                <Text size="sm">
+                  One “{labelColumn}”:{" "}
+                  {plan.check.labels.map((l: any) => l.label).join(", ")} —
+                  with a confidence score
+                </Text>
+              </Fact>
+              <Fact label="Preparation">
+                <Text size="sm">
+                  Relay skips blank rows and uses repeated texts once, then sets
+                  aside {plan.counts.eval} examples (about 20% of each category)
+                  for testing. The model learns from the other{" "}
+                  {plan.counts.train} and is tested on examples it hasn’t seen.
+                  How well it does is only known after testing.
+                </Text>
+              </Fact>
+            </Stack>
+            <Divider />
+            {!state.provider.connected ? (
+              <Paper withBorder p="lg" radius="md">
+                <Title order={4}>Connect Hugging Face</Title>
+                <Text size="sm" c="dimmed" mt={4} mb="md">
+                  Relay trains and hosts models with your Hugging Face account.
+                  Use a token with write access. It’s kept in this computer’s
+                  secure storage and never shown again.
+                </Text>
+                <Group align="flex-end">
+                  <TextInput
+                    ref={secret}
+                    type="password"
+                    label="Access token"
+                    autoComplete="off"
+                    style={{ flex: 1 }}
+                  />
+                  <TextInput
+                    label="Organization (optional)"
+                    description="Leave blank to bill your own account"
+                    value={namespace}
+                    onChange={(e) => setNamespace(e.target.value)}
+                  />
+                  <Button
+                    onClick={() =>
+                      change(async () => {
+                        await api("connectProvider", {
+                          token: secret.current?.value,
+                          namespace: namespace.trim(),
+                        });
+                        if (secret.current) secret.current.value = "";
+                      })
+                    }
+                  >
+                    Connect
+                  </Button>
+                </Group>
+              </Paper>
+            ) : plan.error ? (
+              <Alert color="orange">{plan.error}</Alert>
+            ) : (
+              <Stack gap="md">
+                <Select
+                  label="Training speed"
+                  data={plan.training.map((t: any) => ({
+                    value: t.flavor,
+                    label: `${t.label} · ${t.speed} · up to ${usd(t.maxUSD)}`,
+                  }))}
+                  value={flavor}
+                  allowDeselect={false}
+                  onChange={setFlavor}
+                />
+                {training && (
+                  <Stack gap="sm">
+                    <Fact label="Training (one time)">
+                      <Text size="sm" fw={600}>
+                        Up to {usd(training.maxUSD)}
+                      </Text>
+                      <Text size="sm" c="dimmed">
+                        {usd(training.unitCostUSD)} per {training.unitLabel} on{" "}
+                        {training.hardware}. It stops automatically after{" "}
+                        {training.timeoutMinutes} minutes; the actual cost
+                        depends on how long it runs.
+                      </Text>
+                    </Fact>
+                    <Fact label="Hosting (ongoing)">
+                      <Text size="sm">
+                        Only if you publish after testing — from{" "}
+                        {usd(Math.min(...plan.hosting.map((h: any) => h.pricePerHour)))}{" "}
+                        per hour. You’ll approve this separately.
+                      </Text>
+                    </Fact>
+                  </Stack>
+                )}
+                <Alert color="gray" title="What Relay sends to Hugging Face">
+                  <Text size="sm">
+                    The “{textColumn}” and “{labelColumn}” values from{" "}
+                    {plural(plan.counts.train + plan.counts.eval, "row")} of{" "}
+                    {plan.collection.fileName}. No other columns. They go to a
+                    private dataset in {state.provider.namespace}, deleted when
+                    training ends. The trained model and up to 20 test examples
+                    are saved in a private model repository there.
+                  </Text>
+                </Alert>
+                <Accordion variant="default">
+                  <Accordion.Item value="detail">
+                    <Accordion.Control>Technical detail</Accordion.Control>
+                    <Accordion.Panel>
+                      <Code block>
+                        {JSON.stringify(
+                          {
+                            recipe: "text-classification",
+                            baseModel: plan.baseModel,
+                            hardware: flavor,
+                            timeoutMinutes: training?.timeoutMinutes,
+                            ...plan.settings,
+                          },
+                          null,
+                          2,
+                        )}
+                      </Code>
+                    </Accordion.Panel>
+                  </Accordion.Item>
+                </Accordion>
+                {budgetNote}
+                {training &&
+                  approval(
+                    `I approve sending this data to Hugging Face and up to ${usd(training.maxUSD)} in training charges.`,
+                  )}
+              </Stack>
+            )}
+            <Group justify="space-between">
+              <Button variant="default" onClick={() => setStage(1)}>
+                Back
+              </Button>
+              <Button
+                disabled={!approved || !training || !state.provider.connected}
+                onClick={() =>
+                  change(async () => {
+                    const m = await api("trainModel", {
+                      collectionId,
+                      textColumn,
+                      labelColumn,
+                      goal: chosenGoal,
+                      name,
+                      flavor,
+                      approved,
+                    });
+                    setApproved(false);
+                    open({ modelId: m.id });
+                  })
+                }
+              >
+                Start training
+              </Button>
+            </Group>
+          </Stack>
+        </Paper>
+      )}
+      {model && (
+        <Stack gap="xl">
+          <Paper p="xl" withBorder radius="lg">
+            <Group justify="space-between">
+              <div>
+                <Title order={3}>Training</Title>
+                <Text size="sm" c="dimmed" mt={4}>
+                  {model.state === "Training" || model.state === "Preparing"
+                    ? `Hugging Face status: ${model.status || "starting"}. You can close Relay; it checks again when it opens.`
+                    : `${plural(model.counts.train, "example")} for training, ${model.counts.eval} for testing on ${model.flavor} · up to ${usd(model.trainingEstimate.maxUSD)}`}
+                </Text>
+              </div>
+              {model.state === "Training" && (
+                <Button
+                  variant="default"
+                  onClick={() =>
+                    change(() => api("cancelModel", { id: model.id }))
+                  }
+                >
+                  Cancel training
+                </Button>
+              )}
+            </Group>
+            {model.error && (
+              <Alert mt="md" color={model.state === "Failed" ? "red" : "orange"}>
+                {model.error}
+              </Alert>
+            )}
+          </Paper>
+          {model.evaluation && (
+            <Paper p="xl" withBorder radius="lg">
+              <Title order={3}>Test results</Title>
+              <Text mt="sm">
+                Picked the right “{model.labelColumn}” for{" "}
+                {Math.round(
+                  model.evaluation.accuracy * model.evaluation.eval_examples,
+                )}{" "}
+                of {model.evaluation.eval_examples} test examples (
+                {percent(model.evaluation.accuracy)}).
+              </Text>
+              <Text size="sm" c="dimmed" mt={4} mb="md">
+                These examples were held back from training. Review the
+                mistakes below before publishing; results on new text can
+                differ.
+              </Text>
+              <ScrollArea>
+                <Table striped mb="lg">
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>{model.labelColumn}</Table.Th>
+                      <Table.Th>Test examples</Table.Th>
+                      <Table.Th>Right when it picks this</Table.Th>
+                      <Table.Th>Found of these</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {Object.entries(model.evaluation.per_label).map(
+                      ([label, s]: any) => (
+                        <Table.Tr key={label}>
+                          <Table.Td>{label}</Table.Td>
+                          <Table.Td>{s.examples}</Table.Td>
+                          <Table.Td>{percent(s.precision)}</Table.Td>
+                          <Table.Td>{percent(s.recall)}</Table.Td>
+                        </Table.Tr>
+                      ),
+                    )}
+                  </Table.Tbody>
+                </Table>
+                <Table striped>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>{model.textColumn}</Table.Th>
+                      <Table.Th>Correct</Table.Th>
+                      <Table.Th>Model picked</Table.Th>
+                      <Table.Th>Confidence</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {model.evaluation.samples.map((s: any, i: number) => (
+                      <Table.Tr key={i}>
+                        <Table.Td>{s.text}</Table.Td>
+                        <Table.Td>{s.expected}</Table.Td>
+                        <Table.Td>
+                          <Badge
+                            variant="light"
+                            color={s.predicted === s.expected ? "teal" : "red"}
+                          >
+                            {s.predicted}
+                          </Badge>
+                        </Table.Td>
+                        <Table.Td>{percent(s.score)}</Table.Td>
+                      </Table.Tr>
+                    ))}
+                  </Table.Tbody>
+                </Table>
+              </ScrollArea>
+            </Paper>
+          )}
+          {["Evaluated", "Publishing", "Published"].includes(model.state) && (
+            <Paper p="xl" withBorder radius="lg">
+              <Title order={3}>Publish</Title>
+              {model.state === "Evaluated" ? (
+                <Stack mt="md">
+                  <Text size="sm" c="dimmed">
+                    Publishing starts paid hosting on Hugging Face so the{" "}
+                    {model.team} team can use this model. Training is already
+                    done; this is a separate, ongoing cost.
+                  </Text>
+                  {state.costs.error && (
+                    <Alert color="orange">{state.costs.error}</Alert>
+                  )}
+                  {!state.costs.error && (
+                    <>
+                      <Select
+                        label="Hosting"
+                        data={state.costs.hosting.map((h: any) => ({
+                          value: h.id,
+                          label: `${h.label} · ${usd(h.pricePerHour)} per hour`,
+                        }))}
+                        value={host?.id || null}
+                        allowDeselect={false}
+                        onChange={setHosting}
+                      />
+                      {host && (
+                        <Fact label="Hosting (ongoing)">
+                          <Text size="sm" fw={600}>
+                            {usd(host.pricePerHour)} per hour · about{" "}
+                            {usd(host.pricePerHour * 720)} per 30 days
+                          </Text>
+                          <Text size="sm" c="dimmed">
+                            Runs continuously until you stop hosting.
+                          </Text>
+                        </Fact>
+                      )}
+                      {budgetNote}
+                      {host &&
+                        approval(
+                          `I approve hosting at ${usd(host.pricePerHour)} per hour until I stop it.`,
+                        )}
+                    </>
+                  )}
+                  <Group>
+                    <Button
+                      disabled={!approved || !host}
+                      onClick={() =>
+                        change(async () => {
+                          await api("publishModel", {
+                            id: model.id,
+                            hosting: host.id,
+                            approved,
+                          });
+                          setApproved(false);
+                        })
+                      }
+                    >
+                      Publish model
+                    </Button>
+                  </Group>
+                </Stack>
+              ) : (
+                <Group justify="space-between" mt="md">
+                  <Text size="sm">
+                    {model.state === "Published"
+                      ? `Published and tested · ${usd(model.hosting.pricePerHour)} per hour`
+                      : `Starting hosting (${model.status || "pending"}). Relay tests it before marking it published.`}
+                  </Text>
+                  <Button
+                    variant="default"
+                    onClick={() =>
+                      change(() => api("unpublishModel", { id: model.id }))
+                    }
+                  >
+                    Stop hosting
+                  </Button>
+                </Group>
+              )}
+            </Paper>
+          )}
+          {model.state === "Published" && (
+            <Paper p="xl" withBorder radius="lg">
+              <Title order={3}>Use the model</Title>
+              <Stack mt="md" gap="xl">
+                <div>
+                  <Text fw={600} mb="xs">
+                    Try it in Relay
+                  </Text>
+                  <Group align="flex-end">
+                    <Textarea
+                      style={{ flex: 1 }}
+                      label={model.textColumn}
+                      minRows={2}
+                      value={tryText}
+                      onChange={(e) => setTryText(e.target.value)}
+                    />
+                    <Button
+                      disabled={!tryText.trim()}
+                      onClick={() =>
+                        act(async () =>
+                          setAnswer(
+                            await api("predict", {
+                              id: model.id,
+                              text: tryText,
+                            }),
+                          ),
+                        )
+                      }
+                    >
+                      Try model
+                    </Button>
+                  </Group>
+                  {answer && (
+                    <Text size="sm" mt="sm">
+                      {model.labelColumn}: <b>{answer.label}</b> ·{" "}
+                      {percent(answer.score)} confident
+                    </Text>
+                  )}
+                </div>
+                <div>
+                  <Text fw={600} mb={4}>
+                    Use in an agent
+                  </Text>
+                  <Text size="sm" c="dimmed">
+                    Members of {model.team} can add a step with the{" "}
+                    <b>model</b> action and choose “{model.name}”. The step
+                    reads text from an input or an earlier step and outputs{" "}
+                    {"{ label, score }"}.
+                  </Text>
+                </div>
+                <div>
+                  <Text fw={600} mb={4}>
+                    API access
+                  </Text>
+                  <Text size="sm" c="dimmed" mb="sm">
+                    Tokens are scoped to this model and shown once. The API
+                    answers on this computer while Relay is open.
+                  </Text>
+                  <Group>
+                    <Button
+                      variant="light"
+                      onClick={() =>
+                        act(async () => {
+                          const r = await api("token", {
+                            modelId: model.id,
+                            name: "Model API",
+                          });
+                          setToken(r.token);
+                        })
+                      }
+                    >
+                      Create API token
+                    </Button>
+                    <Button
+                      variant="default"
+                      leftSection={<IconCopy size={16} />}
+                      onClick={() =>
+                        navigator.clipboard.writeText(
+                          `curl -X POST http://127.0.0.1:4319/models/${model.id}/predict -H "Authorization: Bearer YOUR_TOKEN" -H "Content-Type: application/json" -d '{"inputs":"Text to classify"}'`,
+                        )
+                      }
+                    >
+                      Copy API example
+                    </Button>
+                  </Group>
+                  {token && (
+                    <Code block mt="sm">
+                      {token}
+                    </Code>
+                  )}
+                  {data.tokens
+                    .filter((t: any) => t.modelId === model.id)
+                    .map((t: any) => (
+                      <Group key={t.id} justify="space-between" mt="sm">
+                        <Text size="sm">
+                          {t.name} · {new Date(t.created).toLocaleDateString()}
+                        </Text>
+                        <Button
+                          size="xs"
+                          color="red"
+                          variant="subtle"
+                          onClick={() =>
+                            act(() => api("revokeToken", { id: t.id }))
+                          }
+                        >
+                          Revoke
+                        </Button>
+                      </Group>
+                    ))}
+                </div>
+              </Stack>
+            </Paper>
+          )}
+        </Stack>
+      )}
+    </>
+  );
+}
+function AddCollection({ opened, close, teams, change }: any) {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [team, setTeam] = useState<string | null>(teams[0]?.value || null);
+  const [file, setFile] = useState<File | null>(null);
+  return (
+    <Modal opened={opened} onClose={close} title="Add data collection" centered>
+      <Stack>
+        <TextInput
+          label="Name"
+          placeholder="Customer accounts"
+          required
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+        <Textarea
+          label="Description"
+          placeholder="What this data is and when to use it"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+        />
+        <Select
+          label="Team that can use it"
+          data={teams}
+          value={team}
+          allowDeselect={false}
+          onChange={setTeam}
+        />
+        <FileInput
+          label="File"
+          description="CSV or Excel (.xlsx), up to 10 MB"
+          placeholder="Choose a file"
+          accept=".csv,.xlsx"
+          value={file}
+          onChange={setFile}
+        />
+        <Button
+          disabled={!name.trim() || !team || !file}
+          onClick={() =>
+            change(async () => {
+              await api("addCollection", {
+                name,
+                description,
+                team,
+                fileName: file!.name,
+                base64: await toBase64(file!),
+              });
+              setName("");
+              setDescription("");
+              setFile(null);
+              close();
+            })
+          }
+        >
+          Add collection
+        </Button>
+      </Stack>
+    </Modal>
+  );
+}
 function Empty({ title, text }: any) {
   return (
     <Paper withBorder radius="lg" className="empty">
@@ -1658,18 +3134,52 @@ function Wizard({ initial, data, close, changed, fail }: any) {
                         updateStep(i, { output: e.target.value })
                       }
                     />
-                    {["upload", "spreadsheet", "transform"].includes(
+                    {s.action === "model" && (
+                      <Select
+                        label="Model"
+                        placeholder={
+                          data.models.length
+                            ? "Choose a model"
+                            : "No published models for your team"
+                        }
+                        value={s.model || null}
+                        data={data.models.map((m: any) => ({
+                          value: m.id,
+                          label: m.name,
+                        }))}
+                        onChange={(v) =>
+                          updateStep(i, { model: v || undefined })
+                        }
+                      />
+                    )}
+                    {["upload", "spreadsheet", "transform", "model"].includes(
                       s.action,
                     ) && (
                       <Select
                         label="File / data from step"
                         value={s.file || null}
-                        data={form.workflow.steps
-                          .slice(0, i)
-                          .map((p: Step) => ({
-                            value: p.output,
-                            label: p.title,
-                          }))}
+                        data={[
+                          {
+                            group: "Earlier steps",
+                            items: form.workflow.steps
+                              .slice(0, i)
+                              .map((p: Step) => ({
+                                value: p.output,
+                                label: p.title,
+                              })),
+                          },
+                          ...(["transform", "model"].includes(s.action)
+                            ? []
+                            : [
+                                {
+                                  group: "Team data",
+                                  items: data.collections.map((c: any) => ({
+                                    value: `collection:${c.id}`,
+                                    label: c.name,
+                                  })),
+                                },
+                              ]),
+                        ]}
                         onChange={(v) =>
                           updateStep(i, { file: v || undefined })
                         }
@@ -1787,11 +3297,18 @@ function Wizard({ initial, data, close, changed, fail }: any) {
               </Text>
               <MultiSelect
                 label="Approved websites"
+                description="Only websites your admin approved for your team are listed."
                 value={form.workflow.sites}
-                data={data.sites.map((s: any) => ({
-                  value: s.id,
-                  label: s.name,
-                }))}
+                data={data.sites
+                  .filter(
+                    (s: any) =>
+                      data.allowedSites.includes(s.id) ||
+                      form.workflow.sites.includes(s.id),
+                  )
+                  .map((s: any) => ({
+                    value: s.id,
+                    label: s.name,
+                  }))}
                 onChange={(v) => wf({ sites: v })}
               />
               {form.workflow.sites.map((site: string) => (
