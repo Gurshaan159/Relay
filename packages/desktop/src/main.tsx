@@ -180,6 +180,7 @@ function App() {
                 ["Teams", IconUsers],
                 ["Approved websites", IconWorld],
                 ["Data", IconDatabase],
+                ["Budget", IconCoin],
               ]
             : [
                 ["My agents", IconStack2],
@@ -1510,6 +1511,18 @@ function Admin({ page, setPage, data, act }: any) {
                 </Text>
               )}
             </Stack>
+          </Paper>
+          <Paper withBorder p="xl" radius="lg">
+            <Group justify="space-between">
+              <Title order={3}>Budget</Title>
+              <Badge variant="light" color="gray">
+                Not available yet
+              </Badge>
+            </Group>
+            <Text size="sm" c="dimmed" mt={4}>
+              Relay doesn’t measure agent costs yet, so this team has no
+              spending limit.
+            </Text>
           </Paper>
         </Stack>
       </>

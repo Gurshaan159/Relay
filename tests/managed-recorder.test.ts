@@ -43,7 +43,9 @@ test(
       await page.getByText(/Recording ·/).waitFor();
       await page.getByLabel("Task note", { exact: true }).fill("captured note");
       await page.getByLabel(/^Category/).focus();
-      await page.keyboard.press("ArrowDown");
+      // Type-ahead changes a closed select on every platform; ArrowDown only
+      // opens the menu on macOS.
+      await page.keyboard.press("C");
       await page.keyboard.press("Tab");
       await page.getByLabel("Verification code").fill("secret-12345");
       await page

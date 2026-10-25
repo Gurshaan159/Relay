@@ -61,7 +61,7 @@ try {
   const d = window.getByRole("dialog"); await d.getByLabel("Name").fill("Empty file test");
   await d.locator('input[type="file"]').setInputFiles(empty); await d.getByRole("button", { name: "Add collection", exact: true }).click();
   await d.getByText("The selected file is empty", { exact: true }).waitFor();
-  await shot("03-readable-file-error"); await window.keyboard.press("Escape");
+  await shot("03-readable-file-error"); await window.keyboard.press("Escape"); await d.waitFor({ state: "hidden" });
   await add("Order review data", csv); await add("Customer accounts", xlsx, "Customer success");
   await shot("04-data-collections");
   const row = (name: string) => window.locator(".collection-row").filter({ has: window.getByText(name, { exact: true }) });
@@ -90,13 +90,17 @@ try {
   await window.locator(".agent-title").filter({ hasText: "Prepare team overdue report" }).click();
   await window.getByRole("tab", { name: "Results", exact: true }).click();
   await window.getByRole("cell", { name: "NS-1042", exact: true }).waitFor();
-  const [download] = await Promise.all([window.waitForEvent("download"), window.getByRole("button", { name: "CSV", exact: true }).click()]);
-  const exportPath = path.join(root, "export.csv"); await download.saveAs(exportPath); assert.match(await readFile(exportPath,"utf8"), /NS-1042/);
+  // Electron renderer downloads surface as session "will-download", not as a Playwright page download event.
+  const exportPath = path.join(root, "export.csv");
+  await app.evaluate(({ session }, file) => { session.defaultSession.once("will-download", (_e, item) => { item.setSavePath(file); item.once("done", (_d, state) => { (globalThis as any).relayExport = state; }); }); }, exportPath);
+  await window.getByRole("button", { name: "CSV", exact: true }).click();
+  for (let i = 0; i < 100 && !(await app.evaluate(() => (globalThis as any).relayExport)); i++) await new Promise(r => setTimeout(r, 100));
+  assert.equal(await app.evaluate(() => (globalThis as any).relayExport), "completed"); assert.match(await readFile(exportPath,"utf8"), /NS-1042/);
   await shot("08-collection-agent-results");
   await window.getByRole("tab", { name: "Settings", exact: true }).click(); await nav("Share with team"); await window.getByRole("button", { name: "Stop team sharing", exact: true }).waitFor();
   await person("Jordan Lee"); await nav("Team agents"); await window.locator(".agent-title").filter({ hasText: "Prepare team overdue report" }).click();
   await window.getByRole("tab", { name: "Results", exact: true }).click(); await window.getByRole("heading", { name: "Useful work lands here" }).waitFor();
-  await nav("Run agent"); await nav("Start run"); await window.getByText("Completed", { exact: true }).waitFor({ timeout: 30000 });
+  await nav("Run agent"); await nav("Start run"); await window.getByRole("tab", { name: "Activity", exact: true }).click(); await window.getByText("Completed", { exact: true }).waitFor({ timeout: 30000 });
   await window.getByRole("tab", { name: "Results", exact: true }).click(); await window.getByRole("cell", { name: "NS-1042", exact: true }).waitFor();
   await window.getByRole("tab", { name: "Edit", exact: true }).click(); await nav("Duplicate to edit");
   await wait(()=>store.all("agent").some(a=>a.owner==="jordan" && a.name.includes("Prepare team overdue report")));
